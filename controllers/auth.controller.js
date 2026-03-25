@@ -55,8 +55,8 @@ export const googleAuthSuccess = (req, res) => {
   if (req.user) {
     const token = generateToken(req.user._id);
     // Use localhost:3000 (React) or localhost:5173 (Vite) depending on what you use
-    res.redirect(`http://localhost:3000/login-success?token=${token}`);
+    res.redirect(`https://wpleads.in/login-success?token=${token}`);
   } else {
-    res.redirect("http://localhost:3000/login?error=auth_failed");
+    res.redirect("https://wpleads.in/login?error=auth_failed");
   }
 };
