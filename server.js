@@ -18,6 +18,7 @@ import webhookRoutes from './routes/webhookRoutes.js';
 import workflowRoutes from './routes/workflowRoutes.js';
 import contactRoutes from './routes/contactRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
+import paymentRoutes from './routes/payments.js';
 
 const app = express();
 
@@ -55,6 +56,7 @@ app.use('/api', webhookRoutes);
 app.use('/api/workflows', workflowRoutes);
 app.use('/api/contacts', contactRoutes);
 app.use('/api', chatRoutes);
+app.use('/api/payments', paymentRoutes);
 
 // --- DATABASE CONNECTION ---
 mongoose.connect(process.env.MONGO_URI)
