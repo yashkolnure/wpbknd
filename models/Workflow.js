@@ -1,14 +1,14 @@
 import mongoose from 'mongoose';
 
 const buttonSchema = new mongoose.Schema({
-  id:    { type: String, required: true },   // "btn_1"
+  id:    { type: String, required: true },   // "btn_uuid"
   title: { type: String, required: true },   // max 20 chars
 }, { _id: false });
 
 const rowSchema = new mongoose.Schema({
-  id:          { type: String, required: true },
-  title:       { type: String, required: true },   // max 24 chars
-  description: { type: String, default: '' },       // max 72 chars
+  id:           { type: String, required: true },
+  title:        { type: String, required: true },   // max 24 chars
+  description:  { type: String, default: '' },      // max 72 chars
 }, { _id: false });
 
 const sectionSchema = new mongoose.Schema({
@@ -59,10 +59,13 @@ const nodeSchema = new mongoose.Schema({
   },
 }, { _id: false });
 
+// ─── UPDATED EDGE SCHEMA ──────────────────────────────────────────────────
 const edgeSchema = new mongoose.Schema({
-  id:     String,
-  source: String,
-  target: String,
+  id:           String,
+  source:       String,
+  target:       String,
+  // ✅ sourceHandle stores the specific button/list ID from React Flow
+  sourceHandle: { type: String, default: null }, 
 }, { _id: false });
 
 const workflowSchema = new mongoose.Schema({

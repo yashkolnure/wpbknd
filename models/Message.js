@@ -7,7 +7,7 @@ const messageSchema = new mongoose.Schema(
     from: { type: String, enum: ["customer", "bot", "admin"], required: true },
     
     // UI State
-    isReadByAdmin: { type: Boolean, default: false }, // For unread badge in dashboard
+    isReadByAdmin: { type: Boolean, default: false }, 
     
     type: { 
       type: String, 
@@ -18,16 +18,16 @@ const messageSchema = new mongoose.Schema(
     text: { type: String },
     
     // Meta Tracking
-    messageId: { type: String, unique: true }, // WhatsApp 'wamid' - unique to prevent duplicates
+    messageId: { type: String, unique: true, sparse: true }, // Added sparse: true in case some internal notes don't have IDs
     status: { 
       type: String, 
-      enum: ["pending", "sent", "delivered", "read", "failed"], 
+      // Added 'received' for incoming customer messages
+      enum: ["pending", "sent", "delivered", "read", "failed", "received"], 
       default: "pending" 
     },
     
-    // Context (Replies to specific messages)
     context: {
-      quotedMessageId: String, // The ID of the message being replied to
+      quotedMessageId: String, 
     },
 
     media: {
@@ -39,14 +39,16 @@ const messageSchema = new mongoose.Schema(
 
     metadata: mongoose.Schema.Types.Mixed, 
     
-    // For Debugging
-    error: mongoose.Schema.Types.Mixed, // Stores Axios error details if status is 'failed'
-    nodeId: String, // Which workflow node sent this?
+    error: mongoose.Schema.Types.Mixed, 
+    nodeId: String, 
   },
   { timestamps: true }
 );
 
-// Indexing for faster Chat History loading
+// CRITICAL: Index for Webhook Lookups
+messageSchema.index({ messageId: 1 }); 
+
+// Index for Chat History
 messageSchema.index({ contactId: 1, createdAt: 1 });
 
 export default mongoose.model("Message", messageSchema);
