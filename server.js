@@ -19,8 +19,21 @@ import workflowRoutes from './routes/workflowRoutes.js';
 import contactRoutes from './routes/contactRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
 import paymentRoutes from './routes/payments.js';
+import admin from "firebase-admin";
+import fs from "fs";
+import path from "path";
 
 const app = express();
+// Load the JSON file manually because of ES Modules (import)
+const serviceAccount = JSON.parse(
+  fs.readFileSync(new URL("./serviceAccountKey.json", import.meta.url))
+);
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
+console.log("🔥 Firebase Admin SDK initialized successfully");
 
 // --- MIDDLEWARE ---
 app.use(cors({ 

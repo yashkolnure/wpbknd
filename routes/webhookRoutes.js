@@ -4,6 +4,7 @@ import WhatsApp from '../models/WhatsApp.js';
 import Contact from '../models/Contact.js';
 import Workflow from '../models/Workflow.js';
 import Message from '../models/Message.js';
+import { sendPushNotification } from '../services/notificationService.js';
 
 const router = express.Router();
 const VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN;
@@ -160,7 +161,19 @@ router.post("/webhook", async (req, res) => {
       isReadByAdmin: false,    // admin hasn't opened this chat yet
       timestamp:     new Date(),
     });
-
+try {
+  await sendPushNotification(
+    wa.userId, 
+    `New Message: ${contactProfileName || fromNumber}`, 
+    displaySnippet,
+    {
+      contactId: contact._id.toString(),
+      type: "whatsapp_message"
+    }
+  );
+} catch (pushErr) {
+  console.error("Non-blocking Push Error:", pushErr);
+}
     await executeWorkflow(wa.userId, incomingTextForWorkflow, fromNumber, contact._id);
 
   } catch (err) {
