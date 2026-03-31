@@ -50,6 +50,24 @@ export const login = async (req, res) => {
   }
 };
 
+export const updateFCMToken = async (req, res) => {
+  try {
+    const { fcmToken } = req.body;
+
+    if (!fcmToken) {
+      return res.status(400).json({ message: "Token is required" });
+    }
+
+    // req.user._id comes from your protect/auth middleware
+    await User.findByIdAndUpdate(req.user._id, {
+      $addToSet: { fcmTokens: fcmToken },
+    });
+
+    res.status(200).json({ message: "FCM token updated successfully" });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
 
 export const googleAuthSuccess = (req, res) => {
   if (req.user) {

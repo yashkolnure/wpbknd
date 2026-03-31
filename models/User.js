@@ -10,6 +10,7 @@ const userSchema = new mongoose.Schema(
     plan:          { type: String, enum: ["free", "pro"], default: "free" },
     planExpiresAt: { type: Date, default: null },
     planOrderId:   { type: String, default: null },
+    fcmTokens: [{ type: String }],
   },
   { timestamps: true }
 );
