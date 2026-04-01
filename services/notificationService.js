@@ -10,7 +10,7 @@ export const sendPushNotification = async (userId, title, body, data = {}) => {
     if (!user || !user.fcmTokens || user.fcmTokens.length === 0) {
       return;
     }
-
+console.log(`Sending push to user ${userId} with tokens:`, user.fcmTokens);
     const messages = user.fcmTokens.map((token) => ({
       notification: { title, body },
       data: { ...data, click_action: "FLUTTER_NOTIFICATION_CLICK" },
