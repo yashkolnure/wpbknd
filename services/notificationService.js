@@ -30,20 +30,19 @@ export const sendPushNotification = async (userId, title, body, data = {}) => {
 
     console.log(`📱 Sending push to user ${userId} with ${user.fcmTokens.length} token(s)...`);
 
-    // ── 4. BUILD MESSAGES ────────────────────────────────────────────────
-    const messages = user.fcmTokens.map((token) => ({
-      notification: { 
-        title: title || "New Message",
-        body: body || "You have a new message"
-      },
-      data: { 
-        ...data, 
-        click_action: "FLUTTER_NOTIFICATION_CLICK",
-        userId: userId,
-      },
-      token: token,
-    }));
-
+// ── 4. BUILD MESSAGES ────────────────────────────────────────────────
+const messages = user.fcmTokens.map((token) => ({
+  notification: { 
+    title: title || "New Message",
+    body: body || "You have a new message"
+  },
+  data: { 
+    ...data, 
+    click_action: "FLUTTER_NOTIFICATION_CLICK",
+    userId: userId.toString(),  // ← Convert to string
+  },
+  token: token,
+}));
     // ── 5. SEND TO ALL DEVICES ───────────────────────────────────────────
     console.log(`📤 Sending ${messages.length} message(s) via Firebase...`);
     const responses = await Promise.allSettled(
