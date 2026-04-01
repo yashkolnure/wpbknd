@@ -143,7 +143,7 @@ router.post("/webhook", async (req, res) => {
           ? { $addToSet: { workflows: triggeredWorkflowName } }
           : {}),
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
 
     // ── 6. SAVE INCOMING MESSAGE TO DB ───────────────────────────────────────
