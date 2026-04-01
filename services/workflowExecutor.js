@@ -17,9 +17,9 @@ export const executeWorkflow = async (userId, incomingText, fromNumber, contactI
       matchType === 'exact'    ? text === kw :
       matchType === 'contains' ? text.includes(kw) : false;
 
- const continuationEdge = workflow.edges.find(e => 
-  e.sourceHandle === incomingText.trim() 
-);
+    const continuationEdge = workflow.edges.find(e => 
+      e.sourceHandle === incomingText.trim() 
+    );
 
     if (!isKeywordMatch && !continuationEdge) continue;
 
@@ -74,30 +74,52 @@ const executeFromNode = async (workflow, startNodeId, incomingText, fromNumber, 
         const result = await sendMessage(userId, fromNumber, msgData);
         const metaMessageId = result?.metaMessageId || null;
 
-        // 2. Determine HUMAN-READABLE text for DB logging
-        let loggedText = '';
-        if (msgData.type === 'text') {
-          loggedText = msgData.text;
-        } else if (msgData.type === 'button') {
-          loggedText = msgData.buttonBody || 'Button Message';
-        } else if (msgData.type === 'list') {
-          loggedText = msgData.listBody || 'List Message';
-        } else if (msgData.type === 'media') {
-          loggedText = msgData.mediaCaption || 'Media Message';
-        }
-
-        // 3. Save to Message DB
-        await Message.create({
+        // 2. Build message record with type-specific fields
+        let messageRecord = {
           userId,
           contactId,
           from: 'bot',
           type: msgData.type === 'text' ? 'text' : 'interactive',
-          text: loggedText,
           metaMessageId,
           status: 'sent',
           isReadByAdmin: true,
           timestamp: new Date(),
-        });
+        };
+
+        // 3. Store complete message data based on type
+        if (msgData.type === 'text') {
+          messageRecord.text = msgData.text;
+        } 
+        else if (msgData.type === 'button') {
+          messageRecord.text = msgData.buttonBody || 'Button Message';
+          messageRecord.metadata = {
+            type: 'button',
+            header: msgData.buttonHeader || null,
+            footer: msgData.buttonFooter || null,
+            buttons: msgData.buttons, // Store complete buttons array with id, title
+          };
+        } 
+        else if (msgData.type === 'list') {
+          messageRecord.text = msgData.listBody || 'List Message';
+          messageRecord.metadata = {
+            type: 'list',
+            header: msgData.listHeader || null,
+            footer: msgData.listFooter || null,
+            buttonText: msgData.listButtonText || 'View options',
+            sections: msgData.sections, // Store complete sections with rows (id, title, description)
+          };
+        } 
+        else if (msgData.type === 'media') {
+          messageRecord.text = msgData.mediaCaption || 'Media Message';
+          messageRecord.metadata = {
+            type: 'media',
+            mediaType: msgData.mediaType,
+            mediaUrl: msgData.mediaUrl,
+          };
+        }
+
+        // 4. Save to Message DB
+        await Message.create(messageRecord);
 
       } catch (err) {
         console.error('🔥 Send error:', err.message);
