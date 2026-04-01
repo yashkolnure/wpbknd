@@ -143,7 +143,7 @@ router.post("/webhook", async (req, res) => {
           ? { $addToSet: { workflows: triggeredWorkflowName } }
           : {}),
       },
-      { upsert: true, returnDocument: 'after' }
+      { upsert: true, new: true }
     );
 
     // ── 6. SAVE INCOMING MESSAGE TO DB ───────────────────────────────────────
@@ -161,7 +161,20 @@ router.post("/webhook", async (req, res) => {
       isReadByAdmin: false,    // admin hasn't opened this chat yet
       timestamp:     new Date(),
     });
-
+try {
+  await sendPushNotification(
+    wa.userId, 
+    `New Message: ${contactProfileName || fromNumber}`, 
+    displaySnippet,
+    {
+      contactId: contact._id.toString(),
+      type: "whatsapp_message"
+    },
+    console.log("Push notification sent for new message from:", fromNumber)
+  );
+} catch (pushErr) {
+  console.error("Non-blocking Push Error:", pushErr);
+}
     await executeWorkflow(wa.userId, incomingTextForWorkflow, fromNumber, contact._id);
 
   } catch (err) {
