@@ -42,7 +42,7 @@ router.post("/webhook", async (req, res) => {
           status: { $ne: "read" },     // never downgrade read → delivered
         },
         { $set: { status: newStatus } },
-        { new: true }
+        { returnDocument: 'after' }
       );
 
       return;
