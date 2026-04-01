@@ -169,7 +169,8 @@ try {
     {
       contactId: contact._id.toString(),
       type: "whatsapp_message"
-    }
+    },
+    console.log("Push notification sent for new message from:", fromNumber)
   );
 } catch (pushErr) {
   console.error("Non-blocking Push Error:", pushErr);
