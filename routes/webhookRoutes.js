@@ -22,7 +22,7 @@ router.get('/webhook', (req, res) => {
 
 // Incoming messages & status updates
 router.post("/webhook", async (req, res) => {
-  res.sendStatus(200); // Always respond immediately to avoid timeout
+  res.sendStatus(200);
 
   try {
     const entry  = req.body?.entry?.[0];
@@ -31,7 +31,6 @@ router.post("/webhook", async (req, res) => {
 
     if (!value) return;
 
-    // ── 1. HANDLE STATUS UPDATES ─────────────────────────────────────────
     if (value.statuses && value.statuses.length > 0) {
       const statusUpdate = value.statuses[0];
       const wamid        = statusUpdate.id;
@@ -49,7 +48,7 @@ router.post("/webhook", async (req, res) => {
       return;
     }
 
-    // ── 2. INCOMING MESSAGES ─────────────────────────────────────────────
+    // ── 2. INCOMING MESSAGES ─────────────────────────────────────────────────
     if (!value.messages) return;
 
     const msg                = value.messages[0];
@@ -64,7 +63,7 @@ router.post("/webhook", async (req, res) => {
       return;
     }
 
-    // ── 3. EXTRACT MESSAGE CONTENT ───────────────────────────────────────
+    // ── 3. EXTRACT MESSAGE CONTENT ───────────────────────────────────────────
     let incomingTextForWorkflow = "";
     let displaySnippet          = "";
     let messageType             = msg.type;
@@ -109,7 +108,7 @@ router.post("/webhook", async (req, res) => {
 
     if (!incomingTextForWorkflow && !mediaData) return;
 
-    // ── 4. WORKFLOW KEYWORD MATCHING (for contact tagging only) ──────────
+    // ── 4. WORKFLOW KEYWORD MATCHING (for contact tagging only) ──────────────
     let triggeredWorkflowName = "";
     try {
       const workflows = await Workflow.find({ userId: wa.userId, isActive: true });
@@ -130,7 +129,7 @@ router.post("/webhook", async (req, res) => {
       console.error("Workflow Logic Error:", wfErr.message);
     }
 
-    // ── 5. UPDATE / CREATE CONTACT ───────────────────────────────────────
+    // ── 5. UPDATE / CREATE CONTACT ───────────────────────────────────────────
     const contact = await Contact.findOneAndUpdate(
       { userId: wa.userId, phone: fromNumber },
       {
@@ -147,7 +146,7 @@ router.post("/webhook", async (req, res) => {
       { upsert: true, new: true }
     );
 
-    // ── 6. SAVE INCOMING MESSAGE TO DB ───────────────────────────────────
+    // ── 6. SAVE INCOMING MESSAGE TO DB ───────────────────────────────────────
     await Message.create({
       userId:        wa.userId,
       contactId:     contact._id,
@@ -162,36 +161,24 @@ router.post("/webhook", async (req, res) => {
       isReadByAdmin: false,    // admin hasn't opened this chat yet
       timestamp:     new Date(),
     });
-
-    // ── 7. SEND PUSH NOTIFICATION (Fixed) ────────────────────────────────
-    // FIXED: Removed extra console.log parameter
-    const notificationResult = await sendPushNotification(
-      wa.userId,
-      `New Message: ${contactProfileName || fromNumber}`,
-      displaySnippet,
-      {
-        contactId: contact._id.toString(),
-        type: "whatsapp_message"
-      }
-    );
-
-    // Log the result for debugging
-    if (notificationResult?.success) {
-      console.log(`✅ Push notification sent to ${notificationResult.successCount} device(s)`);
-    } else {
-      console.warn(`⚠️  Push notification failed:`, notificationResult?.error);
-    }
-
-    // ── 8. EXECUTE WORKFLOW (non-blocking) ───────────────────────────────
-    // Fire and forget - don't await
-    executeWorkflow(wa.userId, incomingTextForWorkflow, fromNumber, contact._id)
-      .catch(err => console.error('Workflow execution error:', err.message));
+try {
+  await sendPushNotification(
+    wa.userId, 
+    `New Message: ${contactProfileName || fromNumber}`, 
+    displaySnippet,
+    {
+      contactId: contact._id.toString(),
+      type: "whatsapp_message"
+    },
+    console.log("Push notification sent for new message from:", fromNumber)
+  );
+} catch (pushErr) {
+  console.error("Non-blocking Push Error:", pushErr);
+}
+    await executeWorkflow(wa.userId, incomingTextForWorkflow, fromNumber, contact._id);
 
   } catch (err) {
-    console.error("🔥 Critical Webhook Error:", {
-      message: err.message,
-      stack: err.stack,
-    });
+    console.error("🔥 Critical Webhook Error:", err);
   }
 });
 
