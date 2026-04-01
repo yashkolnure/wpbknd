@@ -64,75 +64,95 @@ const executeFromNode = async (workflow, startNodeId, incomingText, fromNumber, 
       continue;
     }
 
-    // ── Handle message node ──
-    if (nextNode.type === 'message') {
-      const msgData = nextNode.data.message; // Declared ONCE here
-      if (!msgData) { currentId = nextNode.id; continue; }
+   // workflowExecutor.js - Replace the message node handling section
 
-      try {
-        // 1. Send via Meta API
-        const result = await sendMessage(userId, fromNumber, msgData);
-        const metaMessageId = result?.metaMessageId || null;
+if (nextNode.type === 'message') {
+  const msgData = nextNode.data.message;
+  if (!msgData) { 
+    console.log('⚠️ No message data in node:', nextNode.id);
+    currentId = nextNode.id; 
+    continue; 
+  }
 
-        // 2. Build message record with type-specific fields
-        let messageRecord = {
-          userId,
-          contactId,
-          from: 'bot',
-          type: msgData.type === 'text' ? 'text' : 'interactive',
-          metaMessageId,
-          status: 'sent',
-          isReadByAdmin: true,
-          timestamp: new Date(),
-        };
+  let metaMessageId = null;
+  
+  // 1. Send via Meta API (separate try-catch)
+  try {
+    const result = await sendMessage(userId, fromNumber, msgData);
+    metaMessageId = result?.metaMessageId || null;
+    console.log('✅ Message sent successfully, wamid:', metaMessageId);
+  } catch (sendErr) {
+    console.error('🔥 Meta API Send Error:', sendErr.message);
+    // Continue to save attempt even if send fails (for audit trail)
+  }
 
-        // 3. Store complete message data based on type
-        if (msgData.type === 'text') {
-          messageRecord.text = msgData.text;
-        } 
-        else if (msgData.type === 'button') {
-          messageRecord.text = msgData.buttonBody || 'Button Message';
-          messageRecord.metadata = {
-            type: 'button',
-            header: msgData.buttonHeader || null,
-            footer: msgData.buttonFooter || null,
-            buttons: msgData.buttons, // Store complete buttons array with id, title
-          };
-        } 
-        else if (msgData.type === 'list') {
-          messageRecord.text = msgData.listBody || 'List Message';
-          messageRecord.metadata = {
-            type: 'list',
-            header: msgData.listHeader || null,
-            footer: msgData.listFooter || null,
-            buttonText: msgData.listButtonText || 'View options',
-            sections: msgData.sections, // Store complete sections with rows (id, title, description)
-          };
-        } 
-        else if (msgData.type === 'media') {
-          messageRecord.text = msgData.mediaCaption || 'Media Message';
-          messageRecord.metadata = {
-            type: 'media',
-            mediaType: msgData.mediaType,
-            mediaUrl: msgData.mediaUrl,
-          };
-        }
+  // 2. Build message record
+  let messageRecord = {
+    userId,
+    contactId,
+    from: 'bot',
+    type: msgData.type === 'text' ? 'text' : 'interactive',
+    metaMessageId,
+    status: metaMessageId ? 'sent' : 'failed',
+    isReadByAdmin: true,
+    timestamp: new Date(),
+  };
 
-        // 4. Save to Message DB
-        await Message.create(messageRecord);
+  // 3. Add type-specific fields
+  if (msgData.type === 'text') {
+    messageRecord.text = msgData.text;
+  } 
+  else if (msgData.type === 'button') {
+    messageRecord.text = msgData.buttonBody || 'Button Message';
+    messageRecord.metadata = {
+      type: 'button',
+      header: msgData.buttonHeader || null,
+      footer: msgData.buttonFooter || null,
+      buttons: msgData.buttons,
+    };
+  } 
+  else if (msgData.type === 'list') {
+    messageRecord.text = msgData.listBody || 'List Message';
+    messageRecord.metadata = {
+      type: 'list',
+      header: msgData.listHeader || null,
+      footer: msgData.listFooter || null,
+      buttonText: msgData.listButtonText || 'View options',
+      sections: msgData.sections,
+    };
+  } 
+  else if (msgData.type === 'media') {
+    messageRecord.text = msgData.mediaCaption || 'Media Message';
+    messageRecord.metadata = {
+      type: 'media',
+      mediaType: msgData.mediaType,
+      mediaUrl: msgData.mediaUrl,
+    };
+  }
 
-      } catch (err) {
-        console.error('🔥 Send error:', err.message);
-      }
+  // 4. Save to DB (separate try-catch with detailed logging)
+  try {
+    console.log('💾 Attempting to save message:', JSON.stringify(messageRecord, null, 2));
+    const savedMessage = await Message.create(messageRecord);
+    console.log('✅ Message saved to DB:', savedMessage._id);
+  } catch (dbErr) {
+    console.error('🔥 DATABASE SAVE ERROR:', {
+      error: dbErr.message,
+      name: dbErr.name,
+      code: dbErr.code,
+      validationErrors: dbErr.errors,
+      messageRecord: JSON.stringify(messageRecord, null, 2)
+    });
+  }
 
-      currentId = nextNode.id;
+  currentId = nextNode.id;
 
-      // Stop loop if it's an interactive message requiring user input
-      if (msgData.type === 'button' || msgData.type === 'list') {
-        break;
-      }
-      continue;
-    }
+  // Stop loop if interactive message
+  if (msgData.type === 'button' || msgData.type === 'list') {
+    break;
+  }
+  continue;
+}
 
     currentId = nextNode.id;
   }
