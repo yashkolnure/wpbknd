@@ -46,22 +46,13 @@ const executeFromNode = async (workflow, startNodeId, incomingText, fromNumber, 
 
     let nextEdge;
     if (outgoingEdges.length === 1) {
-     
       nextEdge = outgoingEdges[0];
     } else {
- 
-nextEdge = outgoingEdges.find(e => 
-  e.sourceHandle === incomingText.trim()
-);
-
+      nextEdge = outgoingEdges.find(e => e.sourceHandle === incomingText.trim());
       if (!nextEdge) {
-        if (outgoingEdges.length === 1) {
-          nextEdge = outgoingEdges[0];
-        } else {
-          break;
-        }
+        nextEdge = outgoingEdges[0]; // Fallback to first edge if no handle matches
       }
-  }
+    }
 
     const nextNode = nodeMap[nextEdge.target];
     if (!nextNode) break;
@@ -75,58 +66,52 @@ nextEdge = outgoingEdges.find(e =>
 
     // ── Handle message node ──
     if (nextNode.type === 'message') {
-      const msgData = nextNode.data.message;
+      const msgData = nextNode.data.message; // Declared ONCE here
       if (!msgData) { currentId = nextNode.id; continue; }
 
       try {
-        // Send via Meta API
-        const result       = await sendMessage(userId, fromNumber, msgData);
+        // 1. Send via Meta API
+        const result = await sendMessage(userId, fromNumber, msgData);
         const metaMessageId = result?.metaMessageId || null;
 
-        let metadata   = null;
-const msgData = nextNode.data.message;
-let loggedText = '';
+        // 2. Determine HUMAN-READABLE text for DB logging
+        let loggedText = '';
+        if (msgData.type === 'text') {
+          loggedText = msgData.text;
+        } else if (msgData.type === 'button') {
+          loggedText = msgData.buttonBody || 'Button Message';
+        } else if (msgData.type === 'list') {
+          loggedText = msgData.listBody || 'List Message';
+        } else if (msgData.type === 'media') {
+          loggedText = msgData.mediaCaption || 'Media Message';
+        }
 
-// 2. Assign the HUMAN-READABLE text to loggedText
-if (msgData.type === 'text') {
-    loggedText = msgData.text;
-} else if (msgData.type === 'button') {
-    // For buttons, we log the Body text so the admin can see what was asked
-    loggedText = msgData.buttonBody || 'Button Message';
-} else if (msgData.type === 'list') {
-    loggedText = msgData.listBody || 'List Message';
-} else if (msgData.type === 'media') {
-    loggedText = msgData.mediaCaption || 'Media Message';
-}
+        // 3. Save to Message DB
+        await Message.create({
+          userId,
+          contactId,
+          from: 'bot',
+          type: msgData.type === 'text' ? 'text' : 'interactive',
+          text: loggedText,
+          metaMessageId,
+          status: 'sent',
+          isReadByAdmin: true,
+          timestamp: new Date(),
+        });
 
-// 3. Now your existing Save logic will work perfectly
-await Message.create({
-  userId,
-  contactId,
-  from: 'bot',
-  type: msgData.type === 'text' ? 'text' : 'interactive',
-  text: loggedText, // ✅ Now this contains "Welcome!" instead of "button-uuid..."
-  metadata,
-  metaMessageId,
-  status: 'sent',
-  isReadByAdmin: true,
-  timestamp: new Date(),
-});
       } catch (err) {
         console.error('🔥 Send error:', err.message);
       }
 
       currentId = nextNode.id;
 
-      // Stop after button/list — wait for user's next reply
+      // Stop loop if it's an interactive message requiring user input
       if (msgData.type === 'button' || msgData.type === 'list') {
         break;
       }
-
       continue;
     }
 
-    // Unknown node type — just move forward
     currentId = nextNode.id;
   }
 };
