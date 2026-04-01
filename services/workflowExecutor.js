@@ -84,19 +84,18 @@ nextEdge = outgoingEdges.find(e =>
         const metaMessageId = result?.metaMessageId || null;
 
         let metadata   = null;
-const msgData = nextNode.data.message;
 let loggedText = '';
 
 // 2. Assign the HUMAN-READABLE text to loggedText
-if (msgData.type === 'text') {
-    loggedText = msgData.text;
-} else if (msgData.type === 'button') {
+if (nextNode.data.type === 'text') {
+    loggedText = nextNode.data.text;
+} else if (nextNode.data.type === 'button') {
     // For buttons, we log the Body text so the admin can see what was asked
-    loggedText = msgData.buttonBody || 'Button Message';
-} else if (msgData.type === 'list') {
-    loggedText = msgData.listBody || 'List Message';
-} else if (msgData.type === 'media') {
-    loggedText = msgData.mediaCaption || 'Media Message';
+    loggedText = nextNode.data.buttonBody || 'Button Message';
+} else if (nextNode.data.type === 'list') {
+    loggedText = nextNode.data.listBody || 'List Message';
+} else if (nextNode.data.type === 'media') {
+    loggedText = nextNode.data.mediaCaption || 'Media Message';
 }
 
 // 3. Now your existing Save logic will work perfectly
