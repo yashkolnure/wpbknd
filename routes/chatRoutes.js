@@ -26,13 +26,15 @@ router.get("/chats/:contactId/messages", protect, async (req, res) => {
   try {
     const { contactId } = req.params;
 
-    const messages = await Message.find({
-      contactId: contactId,
-      userId: req.user._id, // Security: Ensure this chat belongs to the logged-in user
-    })
-      .sort({ createdAt: 1 }) // Order: Oldest to Newest (Standard Chat Flow)
-      .limit(100); // Limit to last 100 messages for performance
+    // Log this to your console to see what the server is actually looking for
+    console.log(`Fetching messages for Contact: ${contactId} and User: ${req.user._id}`);
 
+    const messages = await Message.find({
+      contactId: contactId, // Mongoose usually handles string-to-objectid conversion here automatically
+      userId: req.user._id,
+    }).sort({ createdAt: 1 });
+
+    console.log(`Found ${messages.length} messages`);
     res.json(messages);
   } catch (err) {
     res.status(500).json({ error: "Failed to load message history" });
