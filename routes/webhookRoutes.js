@@ -38,7 +38,7 @@ router.post("/webhook", async (req, res) => {
   try {
     const updated = await Message.findOneAndUpdate(
       {
-        metaMessageId: wamid,
+        messageId: wamid,
         status: { $ne: "read" }, // Don't overwrite 'read' with 'delivered'
       },
       { $set: { status: newStatus } },
@@ -160,7 +160,7 @@ router.post("/webhook", async (req, res) => {
       media:         mediaData,
       metadata:      interactiveMetadata,
       messageId:     msg.id,   // incoming wamid — for deduplication
-      metaMessageId: null,     // outgoing only — always null for customer messages
+      messageId: null,     // outgoing only — always null for customer messages
       status:        "read",   // you received it — read from your side
       isReadByAdmin: false,    // admin hasn't opened this chat yet
       timestamp:     new Date(),
