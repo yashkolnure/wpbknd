@@ -30,24 +30,27 @@ router.post("/webhook", async (req, res) => {
     const value  = change?.value;
 
     if (!value) return;
-console.log("Received webhook event:", JSON.stringify(req.body, null, 2));
-    if (value.statuses && value.statuses.length > 0) {
-      const statusUpdate = value.statuses[0];
-      const wamid        = statusUpdate.id;
-      const newStatus    = statusUpdate.status;
+   if (value.statuses && value.statuses.length > 0) {
+  const statusUpdate = value.statuses[0];
+  const wamid = statusUpdate.id;
+  const newStatus = statusUpdate.status;
 
-      const updated = await Message.findOneAndUpdate(
-        {
-          metaMessageId: wamid,        // outgoing messages are saved with this field
-          status: { $ne: "read" },     // never downgrade read → delivered
-        },
-        { $set: { status: newStatus } },
-        { returnDocument: 'after' },
-        console.log(`Status update for WAMID ${wamid}: ${newStatus}. DB update result:`, updated ? "Success" : "No matching message found")
-      );
-console.log(`Status update for WAMID ${wamid}: ${newStatus}. DB update result:`, updated ? "Success" : "No matching message found");
-      return;
-    }
+  try {
+    const updated = await Message.findOneAndUpdate(
+      {
+        metaMessageId: wamid,
+        status: { $ne: "read" }, // Don't overwrite 'read' with 'delivered'
+      },
+      { $set: { status: newStatus } },
+      { returnDocument: 'after' } // Correctly placed options object
+    );
+
+    console.log(`Status update for WAMID ${wamid}: ${newStatus}. DB update result:`, updated ? "Success" : "No matching message found");
+  } catch (err) {
+    console.error("Error updating status:", err.message);
+  }
+  return;
+}
 
     // ── 2. INCOMING MESSAGES ─────────────────────────────────────────────────
     if (!value.messages) return;
