@@ -119,7 +119,13 @@ const executeFromNode = async (workflow, startNodeId, incomingText, fromNumber, 
         }
 
         // 4. Save to Message DB
-        await Message.create(messageRecord);
+       try {
+    const savedMsg = await Message.create(messageRecord);
+    console.log("✅ Message saved successfully:", savedMsg._id);
+} catch (dbErr) {
+    console.error("❌ Database Save Error:", dbErr.message);
+    console.error("Data attempted:", JSON.stringify(messageRecord, null, 2));
+}
 
       } catch (err) {
         console.error('🔥 Send error:', err.message);
