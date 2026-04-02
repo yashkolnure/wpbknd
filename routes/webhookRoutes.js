@@ -30,7 +30,7 @@ router.post("/webhook", async (req, res) => {
     const value  = change?.value;
 
     if (!value) return;
-
+console.log("Received webhook event:", JSON.stringify(req.body, null, 2));
     if (value.statuses && value.statuses.length > 0) {
       const statusUpdate = value.statuses[0];
       const wamid        = statusUpdate.id;
@@ -42,9 +42,10 @@ router.post("/webhook", async (req, res) => {
           status: { $ne: "read" },     // never downgrade read → delivered
         },
         { $set: { status: newStatus } },
-        { returnDocument: 'after' }
+        { returnDocument: 'after' },
+        console.log(`Status update for WAMID ${wamid}: ${newStatus}. DB update result:`, updated ? "Success" : "No matching message found")
       );
-
+console.log(`Status update for WAMID ${wamid}: ${newStatus}. DB update result:`, updated ? "Success" : "No matching message found");
       return;
     }
 
