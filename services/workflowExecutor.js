@@ -7,15 +7,27 @@ export const executeWorkflow = async (userId, incomingText, fromNumber, contactI
 
   for (const workflow of workflows) {
     const triggerNode = workflow.nodes.find(n => n.type === 'trigger');
+    
+    // 1. If there's no trigger node or no keyword, skip this workflow
     if (!triggerNode || !triggerNode.data?.keyword) continue;
 
     const { keyword, matchType } = triggerNode.data;
     const text = (incomingText || "").toLowerCase().trim();
-    const kw   = keyword.toLowerCase().trim();
 
-    const isKeywordMatch =
-      matchType === 'exact'    ? text === kw :
-      matchType === 'contains' ? text.includes(kw) : false;
+    // ─── FIX START: Split comma-separated keywords ───
+    const keywordsArray = keyword.split(',').map(k => k.toLowerCase().trim());
+
+    // Check if ANY keyword in the list matches the incoming text
+    const isKeywordMatch = keywordsArray.some(kw => {
+      if (matchType === 'exact') {
+        return text === kw;
+      } else if (matchType === 'contains') {
+        // "contains" logic: Does the customer's message contain one of our keywords?
+        return text.includes(kw);
+      }
+      return false;
+    });
+    // ─── FIX END ───
 
     const continuationEdge = workflow.edges.find(e => 
       e.sourceHandle === incomingText.trim() 
@@ -23,6 +35,7 @@ export const executeWorkflow = async (userId, incomingText, fromNumber, contactI
 
     if (!isKeywordMatch && !continuationEdge) continue;
 
+    // Trigger the execution
     if (isKeywordMatch) {
       await executeFromNode(
         workflow, triggerNode.id, incomingText, fromNumber, userId, contactId
@@ -32,7 +45,9 @@ export const executeWorkflow = async (userId, incomingText, fromNumber, contactI
         workflow, continuationEdge.source, incomingText, fromNumber, userId, contactId
       );
     }
-    break;
+    
+    // IMPORTANT: Stop looking for other workflows once one has matched
+    break; 
   }
 };
 

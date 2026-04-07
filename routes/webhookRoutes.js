@@ -173,7 +173,6 @@ try {
       media:         mediaData,
       metadata:      interactiveMetadata,
       messageId:     msg.id,   // incoming wamid — for deduplication
-      messageId: null,     // outgoing only — always null for customer messages
       status:        "read",   // you received it — read from your side
       isReadByAdmin: false,    // admin hasn't opened this chat yet
       timestamp:     new Date(),
