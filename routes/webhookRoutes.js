@@ -113,25 +113,38 @@ router.post("/webhook", async (req, res) => {
     if (!incomingTextForWorkflow && !mediaData) return;
 
     // ── 4. WORKFLOW KEYWORD MATCHING (for contact tagging only) ──────────────
-    let triggeredWorkflowName = "";
-    try {
-      const workflows = await Workflow.find({ userId: wa.userId, isActive: true });
-      for (const wf of workflows) {
-        const trigger = wf.nodes.find(n => n.type === "trigger");
-        if (!trigger || !trigger.data?.keyword) continue;
 
-        const { keyword, matchType } = trigger.data;
-        const cleanInput = (incomingTextForWorkflow || "").toLowerCase().trim();
-        const cleanKw    = keyword.toLowerCase().trim();
-        const matched    = matchType === "exact"
-          ? cleanInput === cleanKw
-          : cleanInput.includes(cleanKw);
+let triggeredWorkflowName = "";
+try {
+  const workflows = await Workflow.find({ userId: wa.userId, isActive: true });
+  
+  for (const wf of workflows) {
+    const trigger = wf.nodes.find(n => n.type === "trigger");
+    if (!trigger || !trigger.data?.keyword) continue;
 
-        if (matched) { triggeredWorkflowName = wf.name; break; }
+    const { keyword, matchType } = trigger.data;
+    const cleanInput = (incomingTextForWorkflow || "").toLowerCase().trim();
+    
+    // Split keywords by comma and clean them up
+    const keywordsArray = keyword.split(",").map(k => k.toLowerCase().trim());
+
+    // Check if ANY keyword in the array matches
+    const matched = keywordsArray.some(kw => {
+      if (matchType === "exact") {
+        return cleanInput === kw;
+      } else {
+        return cleanInput.includes(kw);
       }
-    } catch (wfErr) {
-      console.error("Workflow Logic Error:", wfErr.message);
+    });
+
+    if (matched) { 
+      triggeredWorkflowName = wf.name; 
+      break; 
     }
+  }
+} catch (wfErr) {
+  console.error("Workflow Logic Error:", wfErr.message);
+}
 
     // ── 5. UPDATE / CREATE CONTACT ───────────────────────────────────────────
     const contact = await Contact.findOneAndUpdate(

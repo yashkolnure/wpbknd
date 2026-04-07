@@ -18,6 +18,7 @@ import webhookRoutes from './routes/webhookRoutes.js';
 import workflowRoutes from './routes/workflowRoutes.js';
 import contactRoutes from './routes/contactRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
+import leadRoutes from './routes/leads.js';
 import paymentRoutes from './routes/payments.js';
 import admin from "firebase-admin";
 import fs from "fs";
@@ -65,6 +66,7 @@ app.get(
 app.use("/api", publicRoutes);
 app.use("/api", privateRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
+app.use('/api/leads', leadRoutes);
 app.use('/api', webhookRoutes);
 app.use('/api/workflows', workflowRoutes);
 app.use('/api/contacts', contactRoutes);
