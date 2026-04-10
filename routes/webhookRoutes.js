@@ -191,7 +191,7 @@ try {
 } catch (pushErr) {
   console.error("Non-blocking Push Error:", pushErr);
 }
-    await executeWorkflow(wa.userId, incomingTextForWorkflow, fromNumber, contact._id);
+    await executeWorkflow(wa.userId, incomingTextForWorkflow, fromNumber, contact._id, contact);
 
   } catch (err) {
     console.error("🔥 Critical Webhook Error:", err);

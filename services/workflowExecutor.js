@@ -1,53 +1,77 @@
 import Workflow from '../models/Workflow.js';
 import { sendMessage } from './messageSender.js';
 import Message from "../models/Message.js";
+import Contact from '../models/Contact.js';
 
 export const executeWorkflow = async (userId, incomingText, fromNumber, contactId) => {
-  const workflows = await Workflow.find({ userId, isActive: true });
+  // 1. Fetch the contact to check for an active session (Current State)
+  const contact = await Contact.findById(contactId);
+  
+  let workflow;
+  let startNodeId;
+  const cleanInput = (incomingText || "").trim();
 
-  for (const workflow of workflows) {
-    const triggerNode = workflow.nodes.find(n => n.type === 'trigger');
+  // ─── 2. SESSION RESUME LOGIC (For Variable Replies) ───
+  if (contact?.activeWorkflowId && contact?.currentNodeId) {
+    workflow = await Workflow.findOne({ _id: contact.activeWorkflowId, isActive: true });
     
-    // 1. If there's no trigger node or no keyword, skip this workflow
-    if (!triggerNode || !triggerNode.data?.keyword) continue;
+    if (workflow) {
+      const currentNode = workflow.nodes.find(n => n.id === contact.currentNodeId);
+      const outgoingEdges = workflow.edges.filter(e => e.source === contact.currentNodeId);
 
-    const { keyword, matchType } = triggerNode.data;
-    const text = (incomingText || "").toLowerCase().trim();
-
-    // ─── FIX START: Split comma-separated keywords ───
-    const keywordsArray = keyword.split(',').map(k => k.toLowerCase().trim());
-
-    // Check if ANY keyword in the list matches the incoming text
-    const isKeywordMatch = keywordsArray.some(kw => {
-      if (matchType === 'exact') {
-        return text === kw;
-      } else if (matchType === 'contains') {
-        // "contains" logic: Does the customer's message contain one of our keywords?
-        return text.includes(kw);
+      if (outgoingEdges.length > 0) {
+        // Logic: Try to match a specific button/handle first
+        const match = outgoingEdges.find(e => e.sourceHandle === cleanInput);
+        
+        if (match) {
+          startNodeId = match.target;
+        } else {
+          // VARIABLE REPLY FIX:
+          // If the last thing we sent was a standard message (not a button/list),
+          // we assume ANY reply is the "answer" and move to the next node.
+          const msgType = currentNode.data?.message?.type;
+          if (msgType !== 'button' && msgType !== 'list') {
+            startNodeId = outgoingEdges[0].target;
+          }
+        }
       }
-      return false;
-    });
-    // ─── FIX END ───
-
-    const continuationEdge = workflow.edges.find(e => 
-      e.sourceHandle === incomingText.trim() 
-    );
-
-    if (!isKeywordMatch && !continuationEdge) continue;
-
-    // Trigger the execution
-    if (isKeywordMatch) {
-      await executeFromNode(
-        workflow, triggerNode.id, incomingText, fromNumber, userId, contactId
-      );
-    } else {
-      await executeFromNode(
-        workflow, continuationEdge.source, incomingText, fromNumber, userId, contactId
-      );
     }
-    
-    // IMPORTANT: Stop looking for other workflows once one has matched
-    break; 
+  }
+
+  // ─── 3. KEYWORD TRIGGER LOGIC (Fallback if no active session) ───
+  if (!startNodeId) {
+    const workflows = await Workflow.find({ userId, isActive: true });
+
+    for (const wf of workflows) {
+      const triggerNode = wf.nodes.find(n => n.type === 'trigger');
+      if (!triggerNode || !triggerNode.data?.keyword) continue;
+
+      const { keyword, matchType } = triggerNode.data;
+      const text = cleanInput.toLowerCase();
+      const keywordsArray = keyword.split(',').map(k => k.toLowerCase().trim());
+
+      const isKeywordMatch = keywordsArray.some(kw => {
+        return matchType === 'exact' ? text === kw : text.includes(kw);
+      });
+
+      if (isKeywordMatch) {
+        workflow = wf;
+        startNodeId = triggerNode.id;
+        break; 
+      }
+    }
+  }
+
+  // ─── 4. TRIGGER EXECUTION ───
+  if (workflow && startNodeId) {
+    await executeFromNode(
+      workflow, 
+      startNodeId, 
+      incomingText, 
+      fromNumber, 
+      userId, 
+      contactId
+    );
   }
 };
 

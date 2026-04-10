@@ -2,6 +2,7 @@ import WhatsApp from '../models/WhatsApp.js';
 import { encrypt, decrypt } from '../utils/encrypt.js';
 import axios from 'axios';
 
+
 export const connect = async (req, res) => {
   try {
     const { phoneNumberId, wabaId, accessToken } = req.body;
