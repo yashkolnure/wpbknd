@@ -28,8 +28,6 @@ export const sendPushNotification = async (userId, title, body, data = {}) => {
       return { success: false, error: "No FCM tokens available" };
     }
 
-    console.log(`📱 Sending push to user ${userId} with ${user.fcmTokens.length} token(s)...`);
-
 // ── 4. BUILD MESSAGES ────────────────────────────────────────────────
 const messages = user.fcmTokens.map((token) => ({
   notification: { 
@@ -44,7 +42,6 @@ const messages = user.fcmTokens.map((token) => ({
   token: token,
 }));
     // ── 5. SEND TO ALL DEVICES ───────────────────────────────────────────
-    console.log(`📤 Sending ${messages.length} message(s) via Firebase...`);
     const responses = await Promise.allSettled(
       messages.map((msg) => admin.messaging().send(msg))
     );
@@ -59,7 +56,6 @@ const messages = user.fcmTokens.map((token) => ({
       
       if (res.status === "fulfilled") {
         successCount++;
-        console.log(`✅ Notification sent to device ${index + 1}. Message ID: ${res.value}`);
       } else {
         failureCount++;
         const error = res.reason;
@@ -69,7 +65,6 @@ const messages = user.fcmTokens.map((token) => ({
         if (error.code === 'messaging/registration-token-not-registered' || 
             error.code === 'messaging/invalid-registration-token' ||
             error.code === 'messaging/mismatched-credential') {
-          console.log(`🗑️  Removing stale token: ${token.substring(0, 20)}...`);
           tokensToRemove.push(token);
         }
       }
@@ -77,8 +72,7 @@ const messages = user.fcmTokens.map((token) => ({
 
     // ── 7. CLEAN UP STALE TOKENS ─────────────────────────────────────────
     if (tokensToRemove.length > 0) {
-      console.log(`🧹 Removing ${tokensToRemove.length} stale token(s) from user ${userId}`);
-      await User.findByIdAndUpdate(userId, {
+          await User.findByIdAndUpdate(userId, {
         $pull: { fcmTokens: { $in: tokensToRemove } }
       });
     }
@@ -92,7 +86,6 @@ const messages = user.fcmTokens.map((token) => ({
     };
 
     if (successCount > 0) {
-      console.log(`✨ Notification sent successfully to ${successCount}/${user.fcmTokens.length} device(s)`);
     } else if (failureCount > 0) {
       console.error(`❌ All ${failureCount} notification(s) failed`);
     }
