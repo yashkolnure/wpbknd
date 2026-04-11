@@ -23,7 +23,7 @@ router.get('/webhook', (req, res) => {
 // Incoming messages & status updates
 router.post("/webhook", async (req, res) => {
   res.sendStatus(200);
-  console.log("Webhook event received:", JSON.stringify(req.body).slice(0, 500)); // Log the incoming payload (truncated for readability)
+  console.log("Webhook event received:", JSON.stringify(req.body).slice(0, 5000)); // Log the incoming payload (truncated for readability)
 
   try {
     const entry  = req.body?.entry?.[0];
