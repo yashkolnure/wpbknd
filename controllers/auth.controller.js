@@ -3,43 +3,63 @@ import bcrypt from "bcryptjs";
 import { generateToken } from "../utils/generateToken.js";
 
 // REGISTER
+
+// REGISTER
 export const register = async (req, res) => {
   try {
-    const { name, email, password, phone } = req.body;
+    let { name, email, password, phone } = req.body;
 
-    // 🔹 Basic validation
-    if (!phone)
-      return res.status(400).json({ message: "Phone number is required" });
+    // ✅ Basic validation
+    if (!name || !email || !password || !phone) {
+      return res.status(400).json({ message: "All fields are required" });
+    }
 
-    if (!/^\+?[0-9]{10,15}$/.test(phone))
+    // ✅ Clean phone (remove spaces, symbols)
+    phone = phone.replace(/\D/g, "");
+
+    // ✅ Normalize to +91
+    if (!phone.startsWith("91")) {
+      phone = "91" + phone;
+    }
+    phone = "+" + phone;
+
+    // ✅ Validate phone
+    if (!/^\+?[0-9]{10,15}$/.test(phone)) {
       return res.status(400).json({ message: "Invalid phone number" });
+    }
 
-    // 🔹 Check existing user (email OR phone)
+    // ✅ Check existing user
     const userExists = await User.findOne({
       $or: [{ email }, { phone }]
     });
 
-    if (userExists)
+    if (userExists) {
       return res.status(400).json({
         message: "User already exists with email or phone"
       });
+    }
 
+    // ✅ Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
-
-    // 🔹 Normalize phone (important)
-    const formattedPhone = phone.startsWith("+")
-      ? phone
-      : `+91${phone}`;
 
     const user = await User.create({
       name,
       email,
       password: hashedPassword,
-      phone: formattedPhone
+      phone
     });
 
+    // ❌ REMOVE PASSWORD FROM RESPONSE
+    const userData = {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone
+    };
+
     res.status(201).json({
-      user,
+      success: true,
+      user: userData,
       token: generateToken(user._id)
     });
 
