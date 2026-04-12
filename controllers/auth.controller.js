@@ -5,24 +5,44 @@ import { generateToken } from "../utils/generateToken.js";
 // REGISTER
 export const register = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, phone } = req.body;
 
-    const userExists = await User.findOne({ email });
+    // 🔹 Basic validation
+    if (!phone)
+      return res.status(400).json({ message: "Phone number is required" });
+
+    if (!/^\+?[0-9]{10,15}$/.test(phone))
+      return res.status(400).json({ message: "Invalid phone number" });
+
+    // 🔹 Check existing user (email OR phone)
+    const userExists = await User.findOne({
+      $or: [{ email }, { phone }]
+    });
+
     if (userExists)
-      return res.status(400).json({ message: "User already exists" });
+      return res.status(400).json({
+        message: "User already exists with email or phone"
+      });
 
     const hashedPassword = await bcrypt.hash(password, 10);
+
+    // 🔹 Normalize phone (important)
+    const formattedPhone = phone.startsWith("+")
+      ? phone
+      : `+91${phone}`;
 
     const user = await User.create({
       name,
       email,
-      password: hashedPassword
+      password: hashedPassword,
+      phone: formattedPhone
     });
 
     res.status(201).json({
       user,
       token: generateToken(user._id)
     });
+
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

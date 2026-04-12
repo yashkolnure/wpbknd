@@ -11,6 +11,7 @@ const userSchema = new mongoose.Schema(
     planExpiresAt: { type: Date, default: null },
     planOrderId:   { type: String, default: null },
     fcmTokens: [{ type: String }],
+    phone: {  type: String,  required: true, unique: true}
   },
   { timestamps: true }
 );

@@ -48,6 +48,7 @@ export const getStatus = async (req, res) => {
       phoneNumberId: wa.phoneNumberId,
       wabaId: wa.wabaId,
       connectedAt: wa.connectedAt,
+      accessToken: decrypt(wa.encryptedToken) 
     });
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
