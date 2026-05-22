@@ -18,7 +18,7 @@ const messageSchema = new mongoose.Schema(
     text: { type: String },
     
     // Meta Tracking
-    messageId: { type: String, unique: true, sparse: true }, // Added sparse: true in case some internal notes don't have IDs
+    messageId: { type: String, index: true },
     status: { 
       type: String, 
       // Added 'received' for incoming customer messages
@@ -40,15 +40,18 @@ const messageSchema = new mongoose.Schema(
     metadata: mongoose.Schema.Types.Mixed, 
     
     error: mongoose.Schema.Types.Mixed, 
-    nodeId: String, 
+    nodeId: String,
+    saved: { type: Boolean, default: false },  // user-bookmarked messages
   },
   { timestamps: true }
 );
 
-// CRITICAL: Index for Webhook Lookups
-messageSchema.index({ messageId: 1 }); 
-
-// Index for Chat History
+// Chat history queries
 messageSchema.index({ contactId: 1, createdAt: 1 });
+// Deduplication — one wamid per user (Meta can send the same webhook multiple times)
+messageSchema.index({ userId: 1, messageId: 1 }, { unique: true, sparse: true });
+// Campaign delivery stats — speeds up getCampaigns enrichment queries
+messageSchema.index({ 'metadata.campaignId': 1, status: 1 }, { sparse: true });
+messageSchema.index({ 'metadata.bulkCampaignId': 1, status: 1 }, { sparse: true });
 
 export default mongoose.model("Message", messageSchema);

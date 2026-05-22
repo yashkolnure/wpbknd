@@ -30,7 +30,9 @@ export const register = async (req, res) => {
       name,
       email,
       password: hashedPassword,
-      phone: finalPhone
+      phone: finalPhone,
+      plan: 'pro',
+      planExpiresAt: null,
     });
 
     res.status(201).json({

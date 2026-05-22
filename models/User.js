@@ -7,7 +7,7 @@ const userSchema = new mongoose.Schema(
     password: String,
     googleId: { type: String }, // New field for Google users
     avatar: { type: String },
-    plan:          { type: String, enum: ["free", "pro"], default: "free" },
+    plan:          { type: String, enum: ["free", "pro"], default: "pro" },
     planExpiresAt: { type: Date, default: null },
     planOrderId:   { type: String, default: null },
     fcmTokens: [{ type: String }],

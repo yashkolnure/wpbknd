@@ -12,6 +12,7 @@ const contactSchema = new mongoose.Schema({
   activeWorkflowId: { type: Schema.Types.ObjectId, ref: 'Workflow', default: null },
   currentNodeId: { type: String, default: null },
   notes:         { type: String, default: '' },
+  optedOut:      { type: Boolean, default: false },
 }, { timestamps: true });
 
 // One contact per phone per user

@@ -62,6 +62,29 @@ export const deleteContact = async (req, res) => {
   }
 };
 
+// GET /api/contacts/export
+export const exportContacts = async (req, res) => {
+  try {
+    const contacts = await Contact.find({ userId: req.user._id }).sort('-lastActive');
+    const rows = ['Name,Phone,Tags,Messages,Last Active,Created'];
+    for (const c of contacts) {
+      rows.push([
+        `"${(c.name || '').replace(/"/g, '""')}"`,
+        c.phone,
+        `"${(c.tags || []).join(';')}"`,
+        c.messageCount,
+        c.lastActive ? new Date(c.lastActive).toLocaleDateString() : '',
+        new Date(c.createdAt).toLocaleDateString(),
+      ].join(','));
+    }
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="contacts.csv"');
+    res.send(rows.join('\n'));
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
 // GET /api/contacts/stats
 export const getContactStats = async (req, res) => {
   try {

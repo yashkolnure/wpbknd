@@ -21,6 +21,10 @@ import chatRoutes from './routes/chatRoutes.js';
 import leadRoutes from './routes/leads.js';
 import whatsappRouter from "./routes/whatsapp.js";
 import paymentRoutes from './routes/payments.js';
+import broadcastRoutes  from './routes/broadcastRoutes.js';
+import walletRoutes    from './routes/walletRoutes.js';
+import templateRoutes  from './routes/templateRoutes.js';
+import bulkRoutes      from './routes/bulkRoutes.js';
 import admin from "firebase-admin";
 import fs from "fs";
 import path from "path";
@@ -42,7 +46,10 @@ app.use(cors({
   origin: ['http://localhost:3000', 'http://localhost:5173', 'http://wpleads.in', 'https://wpleads.in'],
   credentials: true 
 }));
-app.use(express.json());
+// Preserve raw body for webhook signature verification — must be before express.json()
+app.use(express.json({
+  verify: (req, _res, buf) => { req.rawBody = buf; }
+}));
 app.use(passport.initialize());
 
 // --- GOOGLE AUTH ROUTES ---
@@ -74,6 +81,10 @@ app.use('/api/workflows', workflowRoutes);
 app.use('/api/contacts', contactRoutes);
 app.use('/api', chatRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/broadcasts', broadcastRoutes);
+app.use('/api/wallet',    walletRoutes);
+app.use('/api/templates', templateRoutes);
+app.use('/api/bulk',      bulkRoutes);
 
 // --- DATABASE CONNECTION ---
 mongoose.connect(process.env.MONGO_URI)
@@ -84,7 +95,7 @@ mongoose.connect(process.env.MONGO_URI)
   });
 
 // --- SERVER START ---
-const PORT = 5005;
+const PORT = process.env.PORT || 5005;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   console.log(`🔗 Google Auth URL: http://localhost:${PORT}/api/auth/google`);

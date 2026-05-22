@@ -20,7 +20,7 @@ export const createWorkflow = async (req, res) => {
       edges: edges || [],
     });
 
-    res.status(201).json(workflow);
+    res.status(201).json({ ...workflow.toObject(), charged: false, chargedAmount: 0 });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

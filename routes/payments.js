@@ -17,9 +17,9 @@ router.get("/plan", protect, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select("plan planExpiresAt");
     res.json({
-      plan:          user.plan,
+      plan:          "pro",
       planExpiresAt: user.planExpiresAt,
-      isActive:      user.plan === "pro" && (!user.planExpiresAt || user.planExpiresAt > new Date()),
+      isActive:      true, // all accounts are pro; billing is via wallet balance
     });
   } catch {
     res.status(500).json({ error: "Failed to fetch plan" });

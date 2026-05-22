@@ -95,7 +95,7 @@ const executeFromNode = async (workflow, startNodeId, incomingText, fromNumber, 
           contactId,
           from: 'bot',
           type: msgData.type === 'text' ? 'text' : 'interactive',
-          metaMessageId,
+          messageId: metaMessageId,   // wamid — required for delivery/read status updates via webhook
           status: 'sent',
           isReadByAdmin: true,
           timestamp: new Date(),
