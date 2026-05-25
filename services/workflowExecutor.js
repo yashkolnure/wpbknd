@@ -81,7 +81,11 @@ const executeFromNode = async (workflow, startNodeId, incomingText, fromNumber, 
 
     // ── Handle message node ──
     if (nextNode.type === 'message') {
-      const msgData = nextNode.data.message; // Declared ONCE here
+      // Convert Mongoose subdocument → plain JS object so nested arrays
+      // (e.g. productSections[].products) serialize correctly in messageBuilder
+      const msgData = nextNode.data.message?.toObject
+        ? nextNode.data.message.toObject()
+        : nextNode.data.message;
       if (!msgData) { currentId = nextNode.id; continue; }
 
       try {
