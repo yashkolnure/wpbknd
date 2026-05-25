@@ -103,6 +103,54 @@ export const buildMetaPayload = (to, message) => {
           : { link: message.mediaUrl, caption: message.mediaCaption || '' },
       };
 
+    // ── SINGLE PRODUCT — one product card with Buy button ─────────────────────
+    case 'product':
+      return {
+        messaging_product: 'whatsapp',
+        to,
+        type: 'interactive',
+        interactive: {
+          type: 'product',
+          body: { text: message.body || '' },
+          action: {
+            catalog_id: message.catalogId,
+            product_retailer_id: message.productRetailerId,
+          },
+        },
+      };
+
+    // ── MULTI-PRODUCT — up to 30 products in sections ──────────────────────────
+    case 'product_list': {
+      // Fix #6 & #7: Validate required fields and Meta limits
+      if (!message.body?.trim())      throw new Error('product_list requires a non-empty body text');
+      if (!message.sections?.length)  throw new Error('product_list requires at least one section');
+      if (message.sections.length > 10) throw new Error('product_list cannot have more than 10 sections');
+      const totalProducts = message.sections.reduce((sum, s) => sum + (s.products?.length || 0), 0);
+      if (totalProducts > 30) throw new Error('product_list cannot have more than 30 products total');
+      if (totalProducts === 0) throw new Error('product_list requires at least one product');
+
+      return {
+        messaging_product: 'whatsapp',
+        to,
+        type: 'interactive',
+        interactive: {
+          type: 'product_list',
+          header: { type: 'text', text: message.header || 'Our Products' },
+          body:   { text: message.body.trim() },
+          ...(message.footer ? { footer: { text: message.footer } } : {}),
+          action: {
+            catalog_id: message.catalogId,
+            sections: message.sections.map(sec => ({
+              title: sec.title || '',
+              product_items: (sec.products || []).map(p => ({
+                product_retailer_id: p.retailerId,
+              })),
+            })),
+          },
+        },
+      };
+    }
+
     default:
       throw new Error(`Unknown message type: ${message.type}`);
   }

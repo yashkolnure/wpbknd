@@ -20,7 +20,7 @@ export const sendMessage = async (userId, to, message) => {
   const payload     = buildMetaPayload(to, message);
 
   const response = await axios.post(
-    `https://graph.facebook.com/v19.0/${wa.phoneNumberId}/messages`,
+    `https://graph.facebook.com/${process.env.GRAPH_VERSION || 'v21.0'}/${wa.phoneNumberId}/messages`,
     payload,
     {
       headers: {

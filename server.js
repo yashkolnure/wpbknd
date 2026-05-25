@@ -25,6 +25,7 @@ import broadcastRoutes  from './routes/broadcastRoutes.js';
 import walletRoutes    from './routes/walletRoutes.js';
 import templateRoutes  from './routes/templateRoutes.js';
 import bulkRoutes      from './routes/bulkRoutes.js';
+import shopRoutes      from './routes/shopRoutes.js';
 import admin from "firebase-admin";
 import fs from "fs";
 import path from "path";
@@ -85,6 +86,7 @@ app.use('/api/broadcasts', broadcastRoutes);
 app.use('/api/wallet',    walletRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/bulk',      bulkRoutes);
+app.use('/api/shop',      shopRoutes);
 
 // --- DATABASE CONNECTION ---
 mongoose.connect(process.env.MONGO_URI)

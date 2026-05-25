@@ -132,6 +132,23 @@ const executeFromNode = async (workflow, startNodeId, incomingText, fromNumber, 
             mediaUrl: msgData.mediaUrl,
           };
         }
+        else if (msgData.type === 'product') {
+          messageRecord.text = msgData.body || 'Product Message';
+          messageRecord.metadata = {
+            type: 'product',
+            catalogId: msgData.catalogId,
+            productRetailerId: msgData.productRetailerId,
+          };
+        }
+        else if (msgData.type === 'product_list') {
+          messageRecord.text = msgData.body || 'Product List Message';
+          messageRecord.metadata = {
+            type: 'product_list',
+            catalogId: msgData.catalogId,
+            header: msgData.header,
+            sections: msgData.sections,
+          };
+        }
 
         // 4. Save to Message DB
        try {
@@ -149,7 +166,8 @@ const executeFromNode = async (workflow, startNodeId, incomingText, fromNumber, 
       currentId = nextNode.id;
 
       // Stop loop if it's an interactive message requiring user input
-      if (msgData.type === 'button' || msgData.type === 'list') {
+      // Fix #5: product and product_list also need user interaction — break here too
+      if (['button', 'list', 'product', 'product_list'].includes(msgData.type)) {
         break;
       }
       continue;
