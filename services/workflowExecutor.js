@@ -88,6 +88,9 @@ const executeFromNode = async (workflow, startNodeId, incomingText, fromNumber, 
         : nextNode.data.message;
       if (!msgData) { currentId = nextNode.id; continue; }
 
+      console.log(`\n🔁 [Workflow] Executing node: ${nextNode.id}`);
+      console.log(`📨 [Workflow] msgData:`, JSON.stringify(msgData, null, 2));
+
       try {
         // 1. Send via Meta API
         const result = await sendMessage(userId, fromNumber, msgData);
