@@ -146,7 +146,7 @@ const executeFromNode = async (workflow, startNodeId, incomingText, fromNumber, 
             type: 'product_list',
             catalogId: msgData.catalogId,
             header: msgData.header,
-            sections: msgData.sections,
+            sections: msgData.productSections || msgData.sections,
           };
         }
 

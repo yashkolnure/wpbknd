@@ -16,10 +16,22 @@ const sectionSchema = new mongoose.Schema({
   rows:  [rowSchema],
 }, { _id: false });
 
+// Product-list section: contains product retailer IDs instead of rows
+const productItemSchema = new mongoose.Schema({
+  id:         { type: String },
+  retailerId: { type: String },
+}, { _id: false });
+
+const productSectionSchema = new mongoose.Schema({
+  id:       { type: String },
+  title:    { type: String, default: '' },
+  products: [productItemSchema],
+}, { _id: false });
+
 const messageSchema = new mongoose.Schema({
   type: {
     type: String,
-    enum: ['text', 'button', 'list', 'media'],
+    enum: ['text', 'button', 'list', 'media', 'product', 'product_list'],
     required: true,
   },
   // --- text ---
@@ -42,6 +54,16 @@ const messageSchema = new mongoose.Schema({
   mediaType:    { type: String, enum: ['image', 'video', 'document'] },
   mediaUrl:     String,
   mediaCaption: String,
+  mediaId:      String,
+  mediaFilename: String,
+
+  // --- product / product_list ---
+  catalogId:          String,
+  body:               String,   // body text shown to customer
+  productRetailerId:  String,   // single product only
+  header:             String,   // product_list header
+  footer:             String,   // product_list footer
+  productSections:    [productSectionSchema],  // product_list sections
 }, { _id: false });
 
 const nodeSchema = new mongoose.Schema({
