@@ -23,6 +23,7 @@ import whatsappRouter from "./routes/whatsapp.js";
 import paymentRoutes from './routes/payments.js';
 import broadcastRoutes  from './routes/broadcastRoutes.js';
 import blogRoutes       from './routes/blog.routes.js';
+import contactFormRoutes from './routes/contactForm.routes.js';
 import walletRoutes    from './routes/walletRoutes.js';
 import templateRoutes  from './routes/templateRoutes.js';
 import bulkRoutes      from './routes/bulkRoutes.js';
@@ -86,7 +87,8 @@ app.use('/api/broadcasts', broadcastRoutes);
 app.use('/api/wallet',    walletRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/bulk',      bulkRoutes);
-app.use('/api/blogs',     blogRoutes);
+app.use('/api/blogs',        blogRoutes);
+app.use('/api/contact-form', contactFormRoutes);
 
 // --- DATABASE CONNECTION ---
 mongoose.connect(process.env.MONGO_URI)
