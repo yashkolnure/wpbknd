@@ -1,6 +1,5 @@
 import express from "express";
 import nodemailer from "nodemailer";
-import ContactMessage from "../models/ContactMessage.js";
 
 const router = express.Router();
 
@@ -12,10 +11,6 @@ router.post("/", async (req, res) => {
   }
 
   try {
-    // 1. Save to DB
-    await ContactMessage.create({ name, email, phone, message });
-
-    // 2. Send email notification
     const transporter = nodemailer.createTransport({
       service: "gmail",
       auth: {
