@@ -11,6 +11,7 @@ import "./config/passport.js";
 
 // 3. Import Controllers and Routes
 import { googleAuthSuccess } from "./controllers/auth.controller.js";
+import authRoutes   from "./routes/auth.routes.js";
 import publicRoutes from "./routes/public.routes.js";
 import privateRoutes from "./routes/private.routes.js";
 import whatsappRoutes from './routes/whatsappRoutes.js';
@@ -73,6 +74,7 @@ app.get(
 );
 
 // --- EXISTING APP ROUTES ---
+app.use("/api/auth", authRoutes);
 app.use("/api", publicRoutes);
 app.use("/api", privateRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
