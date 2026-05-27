@@ -1,7 +1,7 @@
 // routes/auth.route.js
 import express from "express";
 import { register, login, updateFCMToken, forgotPassword, resetPassword } from "../controllers/auth.controller.js";
-import { protect } from "../middleware/auth.middleware.js"; // Assuming this is your JWT middleware
+import { protect } from "../middleware/auth.js";
 
 const router = express.Router();
 
