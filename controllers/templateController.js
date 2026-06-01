@@ -107,28 +107,20 @@ export const listTemplates = async (req, res) => {
 // POST /api/templates
 export const createTemplate = async (req, res) => {
   try {
-    console.log('\n=== CREATE TEMPLATE ===');
-    console.log('[1] req.body:', JSON.stringify(req.body, null, 2));
-
     const { token, wabaId } = await getWaCreds(req.user._id);
-    console.log('[2] wabaId:', wabaId);
-    console.log('[2] token (first 20 chars):', token?.slice(0, 20));
 
     const { name, category, language, headerType, header, body, footer } = req.body;
     const buttons = req.body.buttons ? JSON.parse(req.body.buttons) : [];
 
     if (!name || !category || !language || !body) {
-      console.log('[3] Validation failed — missing fields');
       return res.status(400).json({ message: 'name, category, language and body are required' });
     }
 
     const safeName = name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
-    console.log('[3] safeName:', safeName);
 
     const components = [];
     if (headerType === 'image') {
       if (!req.file) return res.status(400).json({ message: 'An image file is required for image header type.' });
-      console.log('[HEADER] Image file received — size:', req.file.size, 'mime:', req.file.mimetype);
       const handle = await uploadImageHandleForTemplate(req.file.buffer, req.file.mimetype, token);
       components.push({ type: 'HEADER', format: 'IMAGE', example: { header_handle: [handle] } });
     } else if (headerType === 'text' && header?.trim()) {
@@ -149,15 +141,12 @@ export const createTemplate = async (req, res) => {
     }
 
     const metaPayload = { name: safeName, language, category, components };
-    console.log('[4] Meta payload:', JSON.stringify(metaPayload, null, 2));
 
     const metaRes = await axios.post(
       `https://graph.facebook.com/v19.0/${wabaId}/message_templates`,
       metaPayload,
       { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }
     );
-
-    console.log('[5] Meta response:', JSON.stringify(metaRes.data, null, 2));
 
     // Save to DB so this user's template list stays isolated
     const saved = await Template.findOneAndUpdate(
@@ -166,13 +155,8 @@ export const createTemplate = async (req, res) => {
       { upsert: true, new: true }
     );
 
-    console.log('[6] Saved to DB:', saved._id);
     res.json({ success: true, template: { ...saved.toObject(), ...metaRes.data } });
   } catch (err) {
-    console.log('\n[ERROR] createTemplate failed');
-    console.log('[ERROR] err.message:', err.message);
-    console.log('[ERROR] Meta error response:', JSON.stringify(err.response?.data, null, 2));
-    console.log('[ERROR] HTTP status from Meta:', err.response?.status);
     const msg = err.response?.data?.error?.message || err.message;
     res.status(400).json({ message: msg });
   }

@@ -1,6 +1,5 @@
 import express from "express";
 import { protect } from "../middleware/auth.js";
-import { updateFCMToken } from "../controllers/auth.controller.js";
 import { getAllUsersData } from '../controllers/adminController.js';
 
 const router = express.Router();
@@ -12,6 +11,6 @@ router.get("/user/me", protect, async (req, res) => {
 
 
 router.get('/admin/users', protect, getAllUsersData);
-router.patch("/auth/fcm-token", protect, updateFCMToken);
+// FCM token routes live in auth.routes.js (mounted at /api/auth/fcm-token).
 
 export default router;

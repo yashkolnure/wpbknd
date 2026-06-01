@@ -80,6 +80,14 @@ export const updateFCMToken = async (req, res) => {
       return res.status(400).json({ message: "Token is required" });
     }
 
+    // A device token must belong to exactly ONE user. If this device was
+    // previously signed in as someone else, detach the token from every other
+    // user first — otherwise a shared phone would receive both users' pushes.
+    await User.updateMany(
+      { _id: { $ne: req.user._id }, fcmTokens: fcmToken },
+      { $pull: { fcmTokens: fcmToken } }
+    );
+
     // req.user._id comes from your protect/auth middleware
     await User.findByIdAndUpdate(req.user._id, {
       $addToSet: { fcmTokens: fcmToken },
@@ -87,6 +95,27 @@ export const updateFCMToken = async (req, res) => {
 
     res.status(200).json({ message: "FCM token updated successfully" });
     console.log("FCM token updated for user:", req.user._id);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Remove a device token from the current user — called on logout so a
+// signed-out device stops receiving that user's push notifications.
+export const removeFCMToken = async (req, res) => {
+  try {
+    const { fcmToken } = req.body;
+
+    if (!fcmToken) {
+      return res.status(400).json({ message: "Token is required" });
+    }
+
+    await User.findByIdAndUpdate(req.user._id, {
+      $pull: { fcmTokens: fcmToken },
+    });
+
+    res.status(200).json({ message: "FCM token removed successfully" });
+    console.log("FCM token removed for user:", req.user._id);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
