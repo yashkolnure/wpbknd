@@ -1,5 +1,7 @@
 import User from "../models/User.js";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
+import nodemailer from "nodemailer";
 import { generateToken } from "../utils/generateToken.js";
 
 // REGISTER
@@ -78,6 +80,14 @@ export const updateFCMToken = async (req, res) => {
       return res.status(400).json({ message: "Token is required" });
     }
 
+    // A device token must belong to exactly ONE user. If this device was
+    // previously signed in as someone else, detach the token from every other
+    // user first — otherwise a shared phone would receive both users' pushes.
+    await User.updateMany(
+      { _id: { $ne: req.user._id }, fcmTokens: fcmToken },
+      { $pull: { fcmTokens: fcmToken } }
+    );
+
     // req.user._id comes from your protect/auth middleware
     await User.findByIdAndUpdate(req.user._id, {
       $addToSet: { fcmTokens: fcmToken },
@@ -87,6 +97,104 @@ export const updateFCMToken = async (req, res) => {
     console.log("FCM token updated for user:", req.user._id);
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+// Remove a device token from the current user — called on logout so a
+// signed-out device stops receiving that user's push notifications.
+export const removeFCMToken = async (req, res) => {
+  try {
+    const { fcmToken } = req.body;
+
+    if (!fcmToken) {
+      return res.status(400).json({ message: "Token is required" });
+    }
+
+    await User.findByIdAndUpdate(req.user._id, {
+      $pull: { fcmTokens: fcmToken },
+    });
+
+    res.status(200).json({ message: "FCM token removed successfully" });
+    console.log("FCM token removed for user:", req.user._id);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// FORGOT PASSWORD
+export const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      // Don't reveal whether email exists
+      return res.json({ message: "If that email exists, a reset link has been sent." });
+    }
+
+    // Generate token
+    const token = crypto.randomBytes(32).toString("hex");
+    user.resetPasswordToken = crypto.createHash("sha256").update(token).digest("hex");
+    user.resetPasswordExpires = Date.now() + 60 * 60 * 1000; // 1 hour
+    await user.save();
+
+    const resetURL = `${process.env.CLIENT_URL || "http://localhost:3000"}/reset-password/${token}`;
+
+    // Send email
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+
+    await transporter.sendMail({
+      from: `"WPLeads" <${process.env.EMAIL_USER}>`,
+      to: user.email,
+      subject: "Reset your WPLeads password",
+      html: `
+        <div style="font-family:sans-serif;max-width:480px;margin:auto">
+          <h2 style="color:#0f172a">Reset your password</h2>
+          <p>Click the button below to reset your password. This link expires in <b>1 hour</b>.</p>
+          <a href="${resetURL}" style="display:inline-block;padding:12px 24px;background:#0f172a;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold;margin:16px 0">
+            Reset Password
+          </a>
+          <p style="color:#64748b;font-size:13px">If you didn't request this, you can safely ignore this email.</p>
+        </div>
+      `,
+    });
+
+    res.json({ message: "If that email exists, a reset link has been sent." });
+  } catch (error) {
+    console.error("Forgot password error:", error);
+    res.status(500).json({ message: "Failed to send reset email. Try again later." });
+  }
+};
+
+// RESET PASSWORD
+export const resetPassword = async (req, res) => {
+  try {
+    const hashedToken = crypto.createHash("sha256").update(req.params.token).digest("hex");
+
+    const user = await User.findOne({
+      resetPasswordToken: hashedToken,
+      resetPasswordExpires: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      return res.status(400).json({ message: "Reset link is invalid or has expired." });
+    }
+
+    user.password = await bcrypt.hash(req.body.password, 10);
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
+    await user.save();
+
+    res.json({ message: "Password reset successful. You can now log in." });
+  } catch (error) {
+    console.error("Reset password error:", error);
+    res.status(500).json({ message: "Server error. Try again later." });
   }
 };
 

@@ -17,9 +17,18 @@ router.get("/chats", protect, async (req, res) => {
   try {
     const contacts = await Contact.find({ userId: req.user._id })
       .sort({ lastActive: -1 })
-      .select("name phone lastMessage lastActive messageCount tags");
+      .select("name phone lastMessage lastActive messageCount tags")
+      .lean();
 
-    res.json(contacts);
+    // Unread = incoming customer messages the admin hasn't viewed yet
+    const unreadAgg = await Message.aggregate([
+      { $match: { userId: req.user._id, from: "customer", isReadByAdmin: false } },
+      { $group: { _id: "$contactId", count: { $sum: 1 } } },
+    ]);
+    const unreadMap = {};
+    for (const u of unreadAgg) unreadMap[String(u._id)] = u.count;
+
+    res.json(contacts.map(c => ({ ...c, unreadCount: unreadMap[String(c._id)] || 0 })));
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch chat list" });
   }
@@ -72,6 +81,15 @@ router.get("/chats/:contactId/messages", protect, async (req, res) => {
 
     const hasMore = raw.length > limit;
     if (hasMore) raw.pop();
+
+    // Viewing a chat marks its incoming messages as read (only on the latest page,
+    // not when paginating older history via ?before=)
+    if (!before) {
+      Message.updateMany(
+        { contactId, userId: req.user._id, from: "customer", isReadByAdmin: false },
+        { $set: { isReadByAdmin: true } }
+      ).catch(() => {});
+    }
 
     res.json({ messages: raw.reverse(), hasMore });
   } catch (err) {

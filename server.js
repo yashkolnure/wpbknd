@@ -11,6 +11,7 @@ import "./config/passport.js";
 
 // 3. Import Controllers and Routes
 import { googleAuthSuccess } from "./controllers/auth.controller.js";
+import authRoutes   from "./routes/auth.routes.js";
 import publicRoutes from "./routes/public.routes.js";
 import privateRoutes from "./routes/private.routes.js";
 import whatsappRoutes from './routes/whatsappRoutes.js';
@@ -22,6 +23,8 @@ import leadRoutes from './routes/leads.js';
 import whatsappRouter from "./routes/whatsapp.js";
 import paymentRoutes from './routes/payments.js';
 import broadcastRoutes  from './routes/broadcastRoutes.js';
+import blogRoutes       from './routes/blog.routes.js';
+import contactFormRoutes from './routes/contactForm.routes.js';
 import walletRoutes    from './routes/walletRoutes.js';
 import templateRoutes  from './routes/templateRoutes.js';
 import bulkRoutes      from './routes/bulkRoutes.js';
@@ -31,16 +34,16 @@ import fs from "fs";
 import path from "path";
 
 const app = express();
-// Load the JSON file manually because of ES Modules (import)
-const serviceAccount = JSON.parse(
-  fs.readFileSync(new URL("./serviceAccountKey.json", import.meta.url))
-);
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
-
-console.log("🔥 Firebase Admin SDK initialized successfully");
+// Firebase Admin — only initialise if serviceAccountKey.json exists
+try {
+  const keyPath = new URL("./serviceAccountKey.json", import.meta.url);
+  const serviceAccount = JSON.parse(fs.readFileSync(keyPath));
+  admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+  console.log("🔥 Firebase Admin SDK initialized successfully");
+} catch {
+  console.warn("⚠️  serviceAccountKey.json not found — Firebase push notifications disabled.");
+}
 
 // --- MIDDLEWARE ---
 app.use(cors({ 
@@ -67,11 +70,12 @@ app.get("/api/auth/google", passport.authenticate("google", { scope: ["profile",
  */
 app.get(
   "/api/auth/google/callback",
-  passport.authenticate("google", { session: false, failureRedirect: "http://localhost:3000/login" }),
+  passport.authenticate("google", { session: false, failureRedirect: `${process.env.CLIENT_URL || "http://localhost:3000"}/login` }),
   googleAuthSuccess
 );
 
 // --- EXISTING APP ROUTES ---
+app.use("/api/auth", authRoutes);
 app.use("/api", publicRoutes);
 app.use("/api", privateRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
@@ -87,6 +91,8 @@ app.use('/api/wallet',    walletRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/bulk',      bulkRoutes);
 app.use('/api/shop',      shopRoutes);
+app.use('/api/blogs',        blogRoutes);
+app.use('/api/contact-form', contactFormRoutes);
 
 // --- DATABASE CONNECTION ---
 mongoose.connect(process.env.MONGO_URI)

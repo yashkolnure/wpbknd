@@ -3,6 +3,43 @@ import WhatsApp from '../models/WhatsApp.js';
 import Template from '../models/Template.js';
 import { decrypt } from '../utils/encrypt.js';
 
+// Resumable Upload API — uploads a buffer directly to Meta, returns the media handle
+const uploadImageHandleForTemplate = async (buffer, mimeType, token) => {
+  // Step 1 — Create upload session
+  console.log('[UPLOAD] Creating session — size:', buffer.length, 'type:', mimeType);
+  const sessionRes = await axios.post(
+    'https://graph.facebook.com/v19.0/app/uploads',
+    null,
+    {
+      params: {
+        file_name: 'template_header.jpg',
+        file_length: buffer.length,
+        file_type: mimeType,
+      },
+      headers: { Authorization: `OAuth ${token}` },
+    }
+  );
+  const sessionId = sessionRes.data.id;
+  console.log('[UPLOAD] Session created:', sessionId);
+
+  // Step 2 — Upload binary
+  console.log('[UPLOAD] Uploading binary...');
+  const uploadRes = await axios.post(
+    `https://graph.facebook.com/v19.0/${sessionId}`,
+    buffer,
+    {
+      headers: {
+        Authorization: `OAuth ${token}`,
+        'Content-Type': mimeType,
+        file_offset: '0',
+      },
+    }
+  );
+  const handle = uploadRes.data.h;
+  console.log('[UPLOAD] Done — handle:', handle);
+  return handle;
+};
+
 const getWaCreds = async (userId) => {
   const wa = await WhatsApp.findOne({ userId, isVerified: true });
   if (!wa) throw new Error('WhatsApp not connected');
@@ -71,7 +108,9 @@ export const listTemplates = async (req, res) => {
 export const createTemplate = async (req, res) => {
   try {
     const { token, wabaId } = await getWaCreds(req.user._id);
-    const { name, category, language, header, body, footer, buttons } = req.body;
+
+    const { name, category, language, headerType, header, body, footer } = req.body;
+    const buttons = req.body.buttons ? JSON.parse(req.body.buttons) : [];
 
     if (!name || !category || !language || !body) {
       return res.status(400).json({ message: 'name, category, language and body are required' });
@@ -80,7 +119,13 @@ export const createTemplate = async (req, res) => {
     const safeName = name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
 
     const components = [];
-    if (header?.trim()) components.push({ type: 'HEADER', format: 'TEXT', text: header.trim() });
+    if (headerType === 'image') {
+      if (!req.file) return res.status(400).json({ message: 'An image file is required for image header type.' });
+      const handle = await uploadImageHandleForTemplate(req.file.buffer, req.file.mimetype, token);
+      components.push({ type: 'HEADER', format: 'IMAGE', example: { header_handle: [handle] } });
+    } else if (headerType === 'text' && header?.trim()) {
+      components.push({ type: 'HEADER', format: 'TEXT', text: header.trim() });
+    }
     components.push({ type: 'BODY', text: body.trim() });
     if (footer?.trim()) components.push({ type: 'FOOTER', text: footer.trim() });
     if (buttons?.length > 0) {
@@ -95,9 +140,11 @@ export const createTemplate = async (req, res) => {
       });
     }
 
+    const metaPayload = { name: safeName, language, category, components };
+
     const metaRes = await axios.post(
       `https://graph.facebook.com/v19.0/${wabaId}/message_templates`,
-      { name: safeName, language, category, components },
+      metaPayload,
       { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }
     );
 

@@ -11,11 +11,13 @@ const userSchema = new mongoose.Schema(
     planExpiresAt: { type: Date, default: null },
     planOrderId:   { type: String, default: null },
     fcmTokens: [{ type: String }],
-    phone: { 
-    type: String, 
-    sparse: true, // Allows multiple null/missing values while keeping uniqueness for others
-    unique: true 
-  }
+    phone: {
+      type: String,
+      sparse: true,
+      unique: true
+    },
+    resetPasswordToken:   { type: String },
+    resetPasswordExpires: { type: Date },
   },
   { timestamps: true }
 );
