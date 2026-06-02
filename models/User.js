@@ -3,7 +3,9 @@ import mongoose from "mongoose";
 const userSchema = new mongoose.Schema(
   {
     name: String,
-    email: { type: String, unique: true },
+    // lowercase + trim so "Yash@Gmail.com" and "yash@gmail.com" are the SAME
+    // account (Mongoose normalizes on save; queries are normalized in controllers).
+    email: { type: String, unique: true, lowercase: true, trim: true },
     password: String,
     googleId: { type: String }, // New field for Google users
     avatar: { type: String },

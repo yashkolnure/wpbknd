@@ -4,6 +4,10 @@ import crypto from "crypto";
 import nodemailer from "nodemailer";
 import { generateToken } from "../utils/generateToken.js";
 
+// Normalize emails so case/whitespace never splits one person into two accounts
+// or blocks login (e.g. "Yash@Gmail.com " === "yash@gmail.com").
+const normalizeEmail = (e) => (e || "").trim().toLowerCase();
+
 // REGISTER
 // controllers/auth.controller.js
 
@@ -14,6 +18,8 @@ export const register = async (req, res) => {
     if (!name || !email || !password || !phone) {
       return res.status(400).json({ message: "All fields are required" });
     }
+
+    email = normalizeEmail(email);
 
     // Normalize phone to +91XXXXXXXXXX
     const cleanPhone = "+" + phone.replace(/\D/g, "").replace(/^0+/, "");
@@ -52,7 +58,8 @@ export const register = async (req, res) => {
 // LOGIN
 export const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { password } = req.body;
+    const email = normalizeEmail(req.body.email);
 
     const user = await User.findOne({ email });
     if (!user)
@@ -124,7 +131,7 @@ export const removeFCMToken = async (req, res) => {
 // FORGOT PASSWORD
 export const forgotPassword = async (req, res) => {
   try {
-    const { email } = req.body;
+    const email = normalizeEmail(req.body.email);
     const user = await User.findOne({ email });
 
     if (!user) {
@@ -138,19 +145,22 @@ export const forgotPassword = async (req, res) => {
     user.resetPasswordExpires = Date.now() + 60 * 60 * 1000; // 1 hour
     await user.save();
 
-    const resetURL = `${process.env.CLIENT_URL || "http://localhost:3000"}/reset-password/${token}`;
+    const resetURL = `${process.env.CLIENT_URL || "https://wpleads.in"}/reset-password/${token}`;
 
-    // Send email
+    // Send email via the WPLeads SMTP relay (credentials in .env, not committed).
     const transporter = nodemailer.createTransport({
-      service: "gmail",
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT) || 587,
+      secure: process.env.SMTP_SECURE === "true", // false for STARTTLS on 587
       auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
       },
+      tls: { rejectUnauthorized: false },
     });
 
     await transporter.sendMail({
-      from: `"WPLeads" <${process.env.EMAIL_USER}>`,
+      from: process.env.SMTP_FROM || "WPleads Notifications <admin@wpleads.in>",
       to: user.email,
       subject: "Reset your WPLeads password",
       html: `
