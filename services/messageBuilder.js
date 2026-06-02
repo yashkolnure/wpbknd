@@ -1,14 +1,43 @@
-// Build component parameters array from variable values
-const buildTemplateComponents = (components, variables = []) => {
+// Resolve a usable media link for a media HEADER from the template definition
+// (or an explicit per-send override on the message).
+const headerMediaLink = (comp, message = {}) => {
+  if (message.headerMediaUrl) return message.headerMediaUrl;          // explicit override
+  if (comp?.example?.header_url) return comp.example.header_url;
+  const h = comp?.example?.header_handle;
+  if (Array.isArray(h) && /^https?:\/\//.test(h[0] || '')) return h[0];
+  if (typeof h === 'string' && /^https?:\/\//.test(h)) return h;
+  return null;
+};
+
+// Build the `components` array a template SEND requires.
+//  • Media headers (IMAGE/VIDEO/DOCUMENT) MUST carry the media at send time —
+//    omitting them is what caused Meta to reject every send with (#100).
+//  • TEXT header / BODY components carry their {{n}} variable values.
+const buildTemplateComponents = (components, variables = [], message = {}) => {
   const result = [];
   for (const comp of components) {
+    const type   = (comp.type || '').toUpperCase();
+    const format = (comp.format || '').toUpperCase();
+
+    // Media header — attach the image/video/document so Meta can render it.
+    if (type === 'HEADER' && ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(format)) {
+      const kind    = format.toLowerCase();           // image | video | document
+      const mediaId = message.headerMediaId;
+      const link    = headerMediaLink(comp, message);
+      if (!mediaId && !link) continue;                // nothing to attach — skip
+      const media = mediaId ? { id: mediaId } : { link };
+      result.push({ type: 'header', parameters: [{ type: kind, [kind]: media }] });
+      continue;
+    }
+
+    // Text components with {{n}} placeholders (TEXT header or BODY).
     const paramCount = (comp.text || '').match(/\{\{\d+\}\}/g)?.length || 0;
     if (paramCount === 0) continue;
     const params = Array.from({ length: paramCount }, (_, i) => ({
       type: 'text',
       text: variables[i] ?? `{{${i + 1}}}`,
     }));
-    result.push({ type: comp.type.toLowerCase(), parameters: params });
+    result.push({ type: type.toLowerCase(), parameters: params });
   }
   return result;
 };
@@ -20,7 +49,8 @@ export const buildMetaPayload = (to, message) => {
     case 'template': {
       const components = buildTemplateComponents(
         message.templateComponents || [],
-        message.variables || []
+        message.variables || [],
+        message
       );
       return {
         messaging_product: 'whatsapp',

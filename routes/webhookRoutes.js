@@ -8,6 +8,7 @@ import Message from '../models/Message.js';
 import Campaign from '../models/Campaign.js';
 import BulkCampaign from '../models/BulkCampaign.js';
 import { sendPushNotification } from '../services/notificationService.js';
+import { chargeOnDelivery } from '../services/billing.js';
 
 const router = express.Router();
 const VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN;
@@ -94,6 +95,21 @@ router.post("/webhook", async (req, res) => {
           await BulkCampaign.findByIdAndUpdate(bulkCampaignId, { $inc: inc });
         }
       }
+    }
+
+    // ── BILLING: charge the wallet exactly once, on delivery ────────────────
+    // Only messages Meta confirms as `delivered` (or `read`) are billed, with
+    // the rate captured on the Message at send time. Idempotent — safe to run
+    // on every webhook retry. See services/billing.js.
+    try {
+      const result = await chargeOnDelivery(wamid, newStatus);
+      if (result.billed) {
+        console.log(`💸 Billed ₹${(result.charge / 100).toFixed(2)} for delivered WAMID ${wamid} (user ${result.userId})`);
+      } else if (result.reason === 'insufficient-balance') {
+        console.error(`⚠️ Wallet deduction failed on delivery for WAMID ${wamid} (user ${result.userId}, ₹${(result.charge / 100).toFixed(2)})`);
+      }
+    } catch (billErr) {
+      console.error('Billing-on-delivery error:', billErr.message);
     }
 
     console.log(`Status update for WAMID ${wamid}: ${newStatus}. DB update result:`, updated ? "Success" : "No matching message found");

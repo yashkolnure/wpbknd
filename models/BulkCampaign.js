@@ -11,7 +11,10 @@ const bulkCampaignSchema = new mongoose.Schema({
   failedCount:    { type: Number, default: 0 },
   deliveredCount: { type: Number, default: 0 },
   readCount:      { type: Number, default: 0 },
-  costPaise:      { type: Number, default: 0 },
+  connectionType: { type: String, default: 'own' },  // platform | own — whose WABA sent it
+  metaCostPerMsg: { type: Number, default: 0 }, // Meta base cost per msg, paise (captured at launch)
+  pricePerMsg:    { type: Number, default: 0 }, // wallet charge per DELIVERED msg, paise
+  costPaise:      { type: Number, default: 0 }, // accumulated as deliveries are billed
   failureReason:  { type: String, default: null },
 }, { timestamps: true });
 

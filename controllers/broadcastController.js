@@ -1,28 +1,26 @@
 import Campaign from '../models/Campaign.js';
 import Contact from '../models/Contact.js';
 import Message from '../models/Message.js';
+import WhatsApp from '../models/WhatsApp.js';
 import { sendMessage } from '../services/messageSender.js';
-import { deductBalance, getOrCreateWallet } from './walletController.js';
-import { PRICING } from '../config/pricing.js';
+import { getOrCreateWallet } from './walletController.js';
+import { META_BASE, markupPaise, chargeForMessage, requiredBalance, hasSufficientBalance } from '../config/pricing.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 const FATAL_META_ERRORS = [131031, 132000, 132001];
 
-const runCampaign = async (campaignId, contacts, userId, message, pricePerMsg) => {
-  let sent = 0, failed = 0;
+// `billing` = { category, connectionType, metaCostPaise, markupPaise, perMsgCharge }
+const runCampaign = async (campaignId, contacts, userId, message, billing) => {
+  let sent = 0, failed = 0, lastError = null;
 
   for (const contact of contacts) {
     try {
-      // Send FIRST — deduct wallet only on confirmed delivery
+      // Send the message. The wallet is NOT debited here — billing happens only
+      // when Meta confirms `delivered` (see webhookRoutes.js). The rate captured
+      // on each Message below is what gets charged on delivery.
       const result = await sendMessage(userId, contact.phone, message);
       const wamid  = result?.metaMessageId || null;
-
-      const ok = await deductBalance(userId, pricePerMsg, `Broadcast campaign`);
-      if (!ok) {
-        failed += contacts.length - sent - failed;
-        break;
-      }
 
       await Message.create({
         userId,
@@ -35,6 +33,14 @@ const runCampaign = async (campaignId, contacts, userId, message, pricePerMsg) =
         isReadByAdmin: true,
         timestamp:     new Date(),
         metadata:      { campaignId },
+        billing: {
+          category:       billing.category,
+          connectionType: billing.connectionType,
+          metaCostPaise:  billing.metaCostPaise,
+          markupPaise:    billing.markupPaise,
+          perMsgCharge:   billing.perMsgCharge,
+          charged:        false,
+        },
       });
 
       await Contact.findByIdAndUpdate(contact._id, {
@@ -45,14 +51,16 @@ const runCampaign = async (campaignId, contacts, userId, message, pricePerMsg) =
       sent++;
       await sleep(250);
     } catch (err) {
-      const metaCode = err.response?.data?.error?.code;
-      console.error(`Broadcast send failed for ${contact.phone}: [${metaCode}] ${err.message}`);
+      const metaErr  = err.response?.data?.error;
+      const metaCode = metaErr?.code;
+      lastError = `#${metaCode ?? '?'}: ${metaErr?.error_data?.details || metaErr?.message || err.message}`;
+      console.error(`Broadcast send failed for ${contact.phone}: [${metaCode}] ${lastError}`);
 
       if (FATAL_META_ERRORS.includes(metaCode)) {
         failed += contacts.length - sent - failed;
         await Campaign.findByIdAndUpdate(campaignId, {
           status: 'failed',
-          failureReason: `Template error (${metaCode}): ${err.response?.data?.error?.message || err.message}`,
+          failureReason: `Template error (${metaCode}): ${metaErr?.message || err.message}`,
         });
         return;
       }
@@ -60,11 +68,15 @@ const runCampaign = async (campaignId, contacts, userId, message, pricePerMsg) =
     }
   }
 
+  // NOTE: costPaise is intentionally NOT set here — it accumulates in the
+  // delivery webhook as each delivered message is billed.
+  // If nothing went out, mark the campaign failed and surface the Meta reason
+  // so the user isn't left guessing (previously it showed "done" with no reason).
   await Campaign.findByIdAndUpdate(campaignId, {
-    status:     'done',
-    sentCount:  sent,
+    status:      (sent === 0 && failed > 0) ? 'failed' : 'done',
+    sentCount:   sent,
     failedCount: failed,
-    costPaise:  sent * pricePerMsg,
+    ...(lastError ? { failureReason: lastError } : {}),
   });
 };
 
@@ -83,6 +95,13 @@ export const createCampaign = async (req, res) => {
       });
     }
 
+    // Determine whose WABA / payment method is in play. 'platform' users are
+    // billed full Meta cost + markup; 'own' (Facebook-connected) users only pay
+    // the markup, because Meta already billed their own payment method.
+    const wa = await WhatsApp.findOne({ userId: req.user._id, isVerified: true });
+    if (!wa) return res.status(400).json({ message: 'Connect your WhatsApp number before sending a broadcast.' });
+    const connectionType = wa.connectionType || 'own';
+
     const query = { userId: req.user._id, optedOut: { $ne: true } };
     if (targetTags?.length > 0) query.tags = { $in: targetTags };
     if (filterLast24hrs) query.lastActive = { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) };
@@ -92,14 +111,20 @@ export const createCampaign = async (req, res) => {
       return res.status(400).json({ message: 'No contacts match the selected filters' });
     }
 
-    // Price: service rate for 24hr contacts, marketing rate otherwise
-    const pricePerMsg = filterLast24hrs ? PRICING.service : PRICING.marketing;
-    const totalCost = contacts.length * pricePerMsg;
+    // Category drives the Meta base rate: service for the 24-hr window, else marketing.
+    const category      = filterLast24hrs ? 'service' : 'marketing';
+    const metaCostPaise = META_BASE[category];
+    const markup        = markupPaise(category);
+    const perMsgCharge  = chargeForMessage(category, connectionType);
 
+    // Pre-flight balance gate: the account holder must be able to cover every
+    // message being delivered (worst case) BEFORE the broadcast starts. Actual
+    // debits still happen per delivery.
+    const totalCost = requiredBalance(contacts.length, perMsgCharge);
     const wallet = await getOrCreateWallet(req.user._id);
-    if (wallet.balance < totalCost) {
+    if (!hasSufficientBalance(wallet.balance, contacts.length, perMsgCharge)) {
       return res.status(402).json({
-        message: `Insufficient balance. Need ₹${(totalCost / 100).toFixed(2)}, have ₹${(wallet.balance / 100).toFixed(2)}`,
+        message: `Insufficient balance to broadcast to ${contacts.length} contacts. Need ₹${(totalCost / 100).toFixed(2)}, have ₹${(wallet.balance / 100).toFixed(2)}. Please recharge your wallet.`,
         required: totalCost,
         available: wallet.balance,
       });
@@ -113,17 +138,25 @@ export const createCampaign = async (req, res) => {
       filterLast24hrs: !!filterLast24hrs,
       status: 'running',
       totalCount: contacts.length,
-      pricePerMsg,
+      connectionType,
+      metaCostPerMsg: metaCostPaise,
+      pricePerMsg: perMsgCharge,
     });
 
-    runCampaign(campaign._id, contacts, req.user._id, message, pricePerMsg)
+    const billing = { category, connectionType, metaCostPaise, markupPaise: markup, perMsgCharge };
+    runCampaign(campaign._id, contacts, req.user._id, message, billing)
       .catch(() => Campaign.findByIdAndUpdate(campaign._id, { status: 'failed' }));
 
     res.json({
       success: true,
       campaign,
       totalContacts: contacts.length,
+      connectionType,
+      pricePerMsg: perMsgCharge,
       estimatedCost: `₹${(totalCost / 100).toFixed(2)}`,
+      billingNote: connectionType === 'platform'
+        ? `Charged per delivered message: Meta cost ₹${(metaCostPaise / 100).toFixed(2)} + ${markup ? `₹${(markup / 100).toFixed(2)} ` : ''}platform fee = ₹${(perMsgCharge / 100).toFixed(2)}.`
+        : `Meta bills your own WhatsApp account directly. We charge only the platform fee of ₹${(perMsgCharge / 100).toFixed(2)} per delivered message.`,
     });
   } catch (err) {
     res.status(500).json({ message: err.message });

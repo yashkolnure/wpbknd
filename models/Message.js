@@ -37,11 +37,25 @@ const messageSchema = new mongoose.Schema(
       fileName: String,  
     },
 
-    metadata: mongoose.Schema.Types.Mixed, 
-    
-    error: mongoose.Schema.Types.Mixed, 
+    metadata: mongoose.Schema.Types.Mixed,
+
+    error: mongoose.Schema.Types.Mixed,
     nodeId: String,
     saved: { type: Boolean, default: false },  // user-bookmarked messages
+
+    // Per-message billing. Rates are captured at SEND time (so later .env
+    // changes never re-price in-flight campaigns) but the wallet is only
+    // charged once Meta confirms `delivered` (see webhookRoutes.js).
+    billing: {
+      category:       { type: String },                 // marketing | service | utility | authentication
+      connectionType: { type: String },                 // platform | own (whose WABA / payment method)
+      metaCostPaise:  { type: Number, default: 0 },      // Meta's base cost captured at send
+      markupPaise:    { type: Number, default: 0 },      // our platform fee captured at send
+      perMsgCharge:   { type: Number, default: 0 },      // amount to debit on delivery (platform: meta+markup, own: markup)
+      charged:        { type: Boolean, default: false }, // wallet already debited for this message?
+      chargedAt:      { type: Date },
+      chargeFailed:   { type: Boolean, default: false }, // delivered but wallet had insufficient balance
+    },
   },
   { timestamps: true }
 );

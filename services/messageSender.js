@@ -1,7 +1,62 @@
 import axios from 'axios';
+import FormData from 'form-data';
 import WhatsApp from '../models/WhatsApp.js';
 import { decrypt } from '../utils/encrypt.js';
 import { buildMetaPayload } from './messageBuilder.js';
+
+const GRAPH = () => process.env.GRAPH_VERSION || 'v21.0';
+
+// Sensible defaults per media format when the source URL has no content-type.
+const FORMAT_DEFAULTS = {
+  IMAGE:    { ctype: 'image/png',       name: 'header.png' },
+  VIDEO:    { ctype: 'video/mp4',       name: 'header.mp4' },
+  DOCUMENT: { ctype: 'application/pdf', name: 'header.pdf' },
+};
+
+// Cache of uploaded header media ids so a campaign of N messages uploads the
+// image ONCE, not N times. Keyed by phoneNumberId + source URL.
+const mediaIdCache = new Map(); // key → { id, ts }
+const MEDIA_TTL_MS = 6 * 60 * 60 * 1000; // 6h
+
+// Download a template's header media and (re)upload it to WhatsApp, returning a
+// media id. Sending media-header templates by `link` fails with #131053 because
+// Meta's send pipeline can't fetch the template's scontent CDN handle — uploading
+// the bytes and sending by `id` is the reliable path.
+const resolveHeaderMediaId = async (phoneNumberId, accessToken, srcUrl, format) => {
+  const key = `${phoneNumberId}|${srcUrl}`;
+  const hit = mediaIdCache.get(key);
+  if (hit && Date.now() - hit.ts < MEDIA_TTL_MS) return hit.id;
+
+  const def = FORMAT_DEFAULTS[(format || 'IMAGE').toUpperCase()] || FORMAT_DEFAULTS.IMAGE;
+
+  // 1) download the media from its source URL
+  const dl = await axios.get(srcUrl, { responseType: 'arraybuffer', timeout: 30000 });
+  const buf = Buffer.from(dl.data);
+  const ctype = dl.headers['content-type'] || def.ctype;
+
+  // 2) upload bytes to the WhatsApp media endpoint
+  const form = new FormData();
+  form.append('messaging_product', 'whatsapp');
+  form.append('file', buf, { filename: def.name, contentType: ctype });
+  const up = await axios.post(
+    `https://graph.facebook.com/${GRAPH()}/${phoneNumberId}/media`,
+    form,
+    { headers: { ...form.getHeaders(), Authorization: `Bearer ${accessToken}` }, maxContentLength: Infinity, maxBodyLength: Infinity },
+  );
+
+  const id = up.data?.id;
+  if (id) mediaIdCache.set(key, { id, ts: Date.now() });
+  return id;
+};
+
+// Find a media HEADER component (IMAGE/VIDEO/DOCUMENT) on a template message.
+const findMediaHeader = (message) => {
+  if (message?.type !== 'template') return null;
+  return (message.templateComponents || []).find(c =>
+    (c.type || '').toUpperCase() === 'HEADER' &&
+    ['IMAGE', 'VIDEO', 'DOCUMENT'].includes((c.format || '').toUpperCase())
+  ) || null;
+};
 
 export const sendMessage = async (userId, to, message) => {
   const wa = await WhatsApp.findOne({ userId, isVerified: true });
@@ -17,9 +72,27 @@ export const sendMessage = async (userId, to, message) => {
 
   if (!accessToken) throw new Error('No access token available for this account');
 
-  const payload = buildMetaPayload(to, message);
+  // For media-header templates, upload the header image and send by media id.
+  // (Cached, so a whole campaign uploads it once.) Falls back to link on error.
+  let outgoing = message;
+  const mediaHeader = findMediaHeader(message);
+  if (mediaHeader && !message.headerMediaId) {
+    const srcUrl = message.headerMediaUrl
+      || mediaHeader.example?.header_url
+      || (Array.isArray(mediaHeader.example?.header_handle) ? mediaHeader.example.header_handle[0] : null);
+    if (srcUrl) {
+      try {
+        const mediaId = await resolveHeaderMediaId(wa.phoneNumberId, accessToken, srcUrl, mediaHeader.format);
+        if (mediaId) outgoing = { ...message, headerMediaId: mediaId };
+      } catch (e) {
+        console.error(`⚠️ Header media upload failed (${mediaHeader.format}) — falling back to link, may fail with #131053:`, e.response?.data?.error?.message || e.message);
+      }
+    }
+  }
 
-  const url = `https://graph.facebook.com/${process.env.GRAPH_VERSION || 'v21.0'}/${wa.phoneNumberId}/messages`;
+  const payload = buildMetaPayload(to, outgoing);
+
+  const url = `https://graph.facebook.com/${GRAPH()}/${wa.phoneNumberId}/messages`;
   console.log(`\n📤 [Meta API] POST ${url}`);
   console.log(`📦 Payload:`, JSON.stringify(payload, null, 2));
 
