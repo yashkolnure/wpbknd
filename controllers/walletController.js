@@ -105,7 +105,7 @@ export const createRechargeOrder = async (req, res) => {
 
 // POST /api/wallet/recharge/verify
 export const verifyRecharge = async (req, res) => {
-  const { razorpay_order_id, razorpay_payment_id, razorpay_signature, amount } = req.body;
+  const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
 
   if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
     return res.status(400).json({ message: 'Missing payment fields' });
@@ -121,24 +121,57 @@ export const verifyRecharge = async (req, res) => {
   }
 
   try {
-    const paise = Math.round(amount); // amount already in paise from Razorpay
-    await Wallet.findOneAndUpdate(
+    // Fetch the REAL payment from Razorpay — NEVER trust an amount from the client.
+    // The signature above only covers `order_id|payment_id`, not the amount, so a
+    // forged `amount` in the request body could otherwise credit an arbitrary sum.
+    const payment = await razorpay.payments.fetch(razorpay_payment_id);
+
+    if (!payment || payment.order_id !== razorpay_order_id) {
+      return res.status(400).json({ message: 'Payment does not match order' });
+    }
+    if (!['captured', 'authorized'].includes(payment.status)) {
+      return res.status(400).json({ message: `Payment not completed (status: ${payment.status})` });
+    }
+
+    const paise = payment.amount; // authoritative, in paise, straight from Razorpay
+
+    // Idempotency gate: the unique partial index on razorpayPaymentId makes this
+    // insert throw 11000 if this payment was already credited, so a replayed
+    // verify request can never credit the wallet twice. Record the row FIRST,
+    // then credit — a crash in between under-credits (safe & reconcilable) rather
+    // than double-credits.
+    try {
+      await WalletTransaction.create({
+        userId:            req.user._id,
+        type:              'credit',
+        amount:            paise,
+        description:       `Wallet recharge via Razorpay`,
+        razorpayOrderId:   razorpay_order_id,
+        razorpayPaymentId: razorpay_payment_id,
+      });
+    } catch (e) {
+      if (e.code === 11000) {
+        const existing = await getOrCreateWallet(req.user._id);
+        return res.json({
+          success: true,
+          alreadyProcessed: true,
+          balancePaise: existing.balance,
+          balanceRupees: (existing.balance / 100).toFixed(2),
+        });
+      }
+      throw e;
+    }
+
+    const wallet = await Wallet.findOneAndUpdate(
       { userId: req.user._id },
       { $inc: { balance: paise } },
-      { upsert: true }
+      { upsert: true, new: true }
     );
-    await WalletTransaction.create({
-      userId:            req.user._id,
-      type:              'credit',
-      amount:            paise,
-      description:       `Wallet recharge via Razorpay`,
-      razorpayOrderId:   razorpay_order_id,
-      razorpayPaymentId: razorpay_payment_id,
-    });
 
-    const wallet = await Wallet.findOne({ userId: req.user._id });
     res.json({ success: true, balancePaise: wallet.balance, balanceRupees: (wallet.balance / 100).toFixed(2) });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    const reason = err?.error?.description || err.message;
+    console.error('verifyRecharge error:', reason);
+    res.status(500).json({ message: reason });
   }
 };

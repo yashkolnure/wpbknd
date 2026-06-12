@@ -1,5 +1,9 @@
 import express from 'express';
 import crypto from 'crypto';
+import axios from 'axios';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import { executeWorkflow } from '../services/workflowExecutor.js';
 import WhatsApp from '../models/WhatsApp.js';
 import Contact from '../models/Contact.js';
@@ -9,9 +13,55 @@ import Campaign from '../models/Campaign.js';
 import BulkCampaign from '../models/BulkCampaign.js';
 import { sendPushNotification } from '../services/notificationService.js';
 import { chargeOnDelivery } from '../services/billing.js';
+import { sendMessage } from '../services/messageSender.js';
+import { generateDirectReply, sanitizeHistory } from '../services/aiService.js';
+import { decrypt } from '../utils/encrypt.js';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const router = express.Router();
 const VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN;
+const GRAPH_VER = () => process.env.GRAPH_VERSION || 'v21.0';
+
+// Download a WhatsApp media file and store it permanently under /uploads.
+// Runs fire-and-forget after the message is saved — updates media.url on the Message.
+async function downloadAndStoreMedia(savedMsgId, userId, mediaId, mimeType, accessToken) {
+  try {
+    const metaRes = await axios.get(
+      `https://graph.facebook.com/${GRAPH_VER()}/${mediaId}`,
+      { headers: { Authorization: `Bearer ${accessToken}` }, timeout: 10000 }
+    );
+    const downloadUrl = metaRes.data?.url;
+    if (!downloadUrl) return;
+
+    const mediaRes = await axios.get(downloadUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      responseType: 'arraybuffer',
+      timeout: 30000,
+    });
+
+    const mimeToExt = {
+      'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png',
+      'image/webp': 'webp', 'image/gif': 'gif',
+      'video/mp4': 'mp4', 'video/3gpp': '3gp',
+      'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a',
+      'application/pdf': 'pdf',
+      'application/msword': 'doc',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    };
+    const ext = mimeToExt[mimeType] || (mimeType?.split('/')?.[1]?.split(';')?.[0]) || 'bin';
+    const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    const dir = path.join(__dirname, '..', 'uploads', userId.toString());
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, filename), Buffer.from(mediaRes.data));
+
+    const BASE_URL = process.env.API_BASE_URL || 'http://localhost:5002';
+    const publicUrl = `${BASE_URL}/uploads/${userId}/${filename}`;
+    await Message.findByIdAndUpdate(savedMsgId, { 'media.url': publicUrl });
+    console.log(`📎 Media saved for message ${savedMsgId}`);
+  } catch (err) {
+    console.error('📎 Media download error:', err.message);
+  }
+}
 
 // Verify Meta webhook signature (X-Hub-Signature-256)
 const verifyWebhookSignature = (req) => {
@@ -23,7 +73,13 @@ const verifyWebhookSignature = (req) => {
     .createHmac('sha256', appSecret)
     .update(req.rawBody || '')
     .digest('hex');
-  return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
+  const sigBuf = Buffer.from(sig);
+  const expBuf = Buffer.from(expected);
+  // timingSafeEqual throws a RangeError when the buffers differ in length (e.g. a
+  // malformed/forged signature). Fail closed on a mismatch — never let it throw
+  // out of this async handler, which would leave the request hanging.
+  if (sigBuf.length !== expBuf.length) return false;
+  return crypto.timingSafeEqual(sigBuf, expBuf);
 };
 
 // Meta verification handshake
@@ -65,30 +121,30 @@ router.post("/webhook", async (req, res) => {
       console.error(`Message FAILED for WAMID ${wamid}: code=${errors[0].code} — ${errors[0].title}: ${errors[0].message}`);
     }
 
-    const updated = await Message.findOneAndUpdate(
-      { messageId: wamid, status: { $ne: "read" } },
+    // returnDocument:'before' gives us the status PRIOR to this webhook, so we can
+    // tell a real transition apart from a duplicate. Meta retries webhooks, so
+    // without this guard a re-sent `delivered` would inc deliveredCount twice.
+    const before = await Message.findOneAndUpdate(
+      { messageId: wamid, status: { $ne: "read" } }, // never downgrade out of 'read'
       { $set: updateFields },
-      { returnDocument: 'after' }
+      { returnDocument: 'before' }
     );
 
-    // On every status update, increment the matching counter on the campaign doc
-    if (updated?.metadata && ['delivered', 'read', 'failed'].includes(newStatus)) {
-      const { campaignId, bulkCampaignId } = updated.metadata;
-      const prevStatus = updated.status; // status BEFORE this update (returnDocument:'after' gives new, so check what changed)
+    // Increment the matching campaign counter — but only on the FIRST transition
+    // into each state, so duplicate/out-of-order webhooks never over-count.
+    if (before?.metadata) {
+      const prev = before.status;
+      const firstDelivered = newStatus === 'delivered' && prev !== 'delivered' && prev !== 'read';
+      const firstRead      = newStatus === 'read'      && prev !== 'read';
+      const firstFailed    = newStatus === 'failed'    && prev !== 'failed';
 
-      // Meta fires webhooks in order: sent → delivered → read
-      // deliveredCount counts every message that reached the device (delivered OR later read)
-      // readCount counts messages the user opened
-      // 'delivered' webhook always arrives before 'read', so:
-      //   delivered → inc deliveredCount only
-      //   read      → inc readCount only (deliveredCount was already incremented earlier)
-      //   failed    → inc failedCount only
       const inc = {};
-      if (newStatus === 'delivered') inc.deliveredCount = 1;
-      if (newStatus === 'read')      inc.readCount = 1;
-      if (newStatus === 'failed')    inc.failedCount = 1;
+      if (firstDelivered) inc.deliveredCount = 1;
+      if (firstRead)      inc.readCount = 1;
+      if (firstFailed)    inc.failedCount = 1;
 
       if (Object.keys(inc).length > 0) {
+        const { campaignId, bulkCampaignId } = before.metadata;
         if (campaignId) {
           await Campaign.findByIdAndUpdate(campaignId, { $inc: inc });
         } else if (bulkCampaignId) {
@@ -112,7 +168,7 @@ router.post("/webhook", async (req, res) => {
       console.error('Billing-on-delivery error:', billErr.message);
     }
 
-    console.log(`Status update for WAMID ${wamid}: ${newStatus}. DB update result:`, updated ? "Success" : "No matching message found");
+    console.log(`Status update for WAMID ${wamid}: ${newStatus}. DB update result:`, before ? "Success" : "No matching message found");
   } catch (err) {
     console.error("Error updating status:", err.message);
   }
@@ -202,23 +258,26 @@ try {
     if (!trigger || !trigger.data?.keyword) continue;
 
     const { keyword, matchType } = trigger.data;
+
+    // Button/list replies: check edge handles first to avoid false keyword matches
+    // (e.g. button ID "w-btn-demo" contains keyword "demo")
+    const isContinuation = wf.edges.some(e => e.sourceHandle && e.sourceHandle === incomingTextForWorkflow.trim());
+    if (isContinuation) {
+      triggeredWorkflowName = wf.name;
+      break;
+    }
+
+    if (matchType === "fallback") continue; // handled separately
+
     const cleanInput = (incomingTextForWorkflow || "").toLowerCase().trim();
-    
-    // Split keywords by comma and clean them up
     const keywordsArray = keyword.split(",").map(k => k.toLowerCase().trim());
+    const matched = keywordsArray.some(kw =>
+      matchType === "exact" ? cleanInput === kw : cleanInput.includes(kw)
+    );
 
-    // Check if ANY keyword in the array matches
-    const matched = keywordsArray.some(kw => {
-      if (matchType === "exact") {
-        return cleanInput === kw;
-      } else {
-        return cleanInput.includes(kw);
-      }
-    });
-
-    if (matched) { 
-      triggeredWorkflowName = wf.name; 
-      break; 
+    if (matched) {
+      triggeredWorkflowName = wf.name;
+      break;
     }
   }
 } catch (wfErr) {
@@ -248,7 +307,7 @@ try {
       console.log(`Duplicate webhook ignored for messageId: ${msg.id}`);
       return;
     }
-    await Message.create({
+    const savedMsg = await Message.create({
       userId:        wa.userId,
       contactId:     contact._id,
       from:          "customer",
@@ -261,6 +320,15 @@ try {
       isReadByAdmin: false,    // admin hasn't opened this chat yet
       timestamp:     new Date(),
     });
+
+    // Fire-and-forget: download the media and store it permanently
+    if (mediaData?.mediaId) {
+      const token = wa.connectionType === 'platform'
+        ? process.env.SYSTEM_USER_TOKEN
+        : decrypt(wa.encryptedToken);
+      downloadAndStoreMedia(savedMsg._id, wa.userId, mediaData.mediaId, mediaData.mimeType, token)
+        .catch(e => console.error('Media store error:', e.message));
+    }
 try {
   await sendPushNotification(
     wa.userId,
@@ -272,7 +340,36 @@ try {
 } catch (pushErr) {
   console.error("Non-blocking Push Error:", pushErr);
 }
-    await executeWorkflow(wa.userId, incomingTextForWorkflow, fromNumber, contact._id, contact);
+    const handledByWorkflow = await executeWorkflow(wa.userId, incomingTextForWorkflow, fromNumber, contact._id, contact);
+
+    // ── 7. AI DIRECT-CONNECT: reply with the LLM when no workflow matched ──────
+    // Only fires if the user enabled AI + "direct connect". Skips media-only
+    // messages (no text to reason over). Conversation context is the recent
+    // history with this contact, sanitized for every provider.
+    if (!handledByWorkflow && incomingTextForWorkflow && !mediaData) {
+      try {
+        const history = await Message.find({ userId: wa.userId, contactId: contact._id })
+          .sort('-createdAt').limit(10).select('from text').lean();
+        const messages = sanitizeHistory(
+          history.reverse().map(m => ({
+            role: m.from === 'customer' ? 'user' : 'assistant',
+            content: m.text || '',
+          }))
+        );
+
+        const reply = await generateDirectReply(wa.userId, messages);
+        if (reply) {
+          await sendMessage(wa.userId, fromNumber, { type: 'text', text: reply });
+          await Message.create({
+            userId: wa.userId, contactId: contact._id, from: 'bot', type: 'text',
+            text: reply, status: 'sent', isReadByAdmin: true, timestamp: new Date(),
+          });
+          console.log(`🤖 [AI direct] Replied to ${fromNumber}`);
+        }
+      } catch (aiErr) {
+        console.error('🤖 [AI direct] error:', aiErr.response?.data?.error?.message || aiErr.message);
+      }
+    }
 
   } catch (err) {
     console.error("🔥 Critical Webhook Error:", err);

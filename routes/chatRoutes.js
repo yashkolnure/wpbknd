@@ -1,6 +1,9 @@
 import express from "express";
 import multer from "multer";
 import axios from "axios";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
 import FormData from "form-data";
 import Message from "../models/Message.js";
 import Contact from "../models/Contact.js";
@@ -8,6 +11,17 @@ import WhatsApp from "../models/WhatsApp.js";
 import { protect } from '../middleware/auth.js';
 import { sendMessage } from "../services/messageSender.js";
 import { decrypt } from "../utils/encrypt.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const MIME_TO_EXT = {
+  'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png',
+  'image/webp': 'webp', 'image/gif': 'gif',
+  'video/mp4': 'mp4', 'video/3gpp': '3gp',
+  'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a',
+  'application/pdf': 'pdf',
+  'application/msword': 'doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+};
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }); // 10 MB limit
@@ -97,7 +111,7 @@ router.get("/chats/:contactId/messages", protect, async (req, res) => {
   }
 });
 
-// --- 3. UPLOAD MEDIA to WhatsApp (returns media_id) ---
+// --- 3. UPLOAD MEDIA to WhatsApp (returns media_id + permanent local url) ---
 router.post("/chats/upload-media", protect, upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
@@ -105,7 +119,9 @@ router.post("/chats/upload-media", protect, upload.single("file"), async (req, r
     const wa = await WhatsApp.findOne({ userId: req.user._id, isVerified: true });
     if (!wa) return res.status(400).json({ error: "WhatsApp not connected" });
 
-    const accessToken = decrypt(wa.encryptedToken);
+    const accessToken = wa.connectionType === "platform"
+      ? process.env.SYSTEM_USER_TOKEN
+      : decrypt(wa.encryptedToken);
 
     const form = new FormData();
     form.append("messaging_product", "whatsapp");
@@ -120,7 +136,16 @@ router.post("/chats/upload-media", protect, upload.single("file"), async (req, r
       { headers: { ...form.getHeaders(), Authorization: `Bearer ${accessToken}` } }
     );
 
-    res.json({ mediaId: response.data.id, mimeType: req.file.mimetype, filename: req.file.originalname });
+    // Save a permanent local copy so chat can display the sent file without re-fetching from Meta
+    const ext = MIME_TO_EXT[req.file.mimetype] || req.file.mimetype?.split("/")?.[1]?.split(";")?.[0] || "bin";
+    const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    const dir = path.join(__dirname, "..", "uploads", req.user._id.toString());
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, filename), req.file.buffer);
+    const BASE_URL = process.env.API_BASE_URL || "http://localhost:5002";
+    const publicUrl = `${BASE_URL}/uploads/${req.user._id}/${filename}`;
+
+    res.json({ mediaId: response.data.id, url: publicUrl, mimeType: req.file.mimetype, filename: req.file.originalname });
   } catch (err) {
     console.error("Media upload error:", err.response?.data || err.message);
     res.status(500).json({ error: "Media upload failed", details: err.response?.data || err.message });
@@ -131,7 +156,7 @@ router.post("/chats/upload-media", protect, upload.single("file"), async (req, r
 router.post("/chats/:id/messages", protect, async (req, res) => {
   try {
     const { id } = req.params;
-    const { text, type, mediaId, mediaType, mediaCaption, mediaFilename } = req.body;
+    const { text, type, mediaId, mediaType, mediaCaption, mediaFilename, mediaUrl } = req.body;
 
     const contact = await Contact.findById(id);
     if (!contact) return res.status(404).json({ error: "Contact not found" });
@@ -154,7 +179,7 @@ router.post("/chats/:id/messages", protect, async (req, res) => {
       text: isMedia ? (mediaCaption || "") : text,
       messageId: metaResponse.messages?.[0]?.id || `admin-${Date.now()}`,
       timestamp: new Date(),
-      ...(isMedia ? { media: { id: mediaId, type: mediaType, filename: mediaFilename } } : {}),
+      ...(isMedia ? { media: { mediaId, url: mediaUrl || null, mimeType: mediaType, fileName: mediaFilename } } : {}),
     });
 
     await Contact.findByIdAndUpdate(id, {
@@ -165,6 +190,60 @@ router.post("/chats/:id/messages", protect, async (req, res) => {
   } catch (err) {
     console.error("Send error:", err.response?.data || err.message);
     res.status(500).json({ error: "Failed to send message", details: err.response?.data || err.message });
+  }
+});
+
+// --- 5. FETCH AND STORE INCOMING MEDIA (for customer messages without a stored URL) ---
+router.post("/chats/messages/:messageId/fetch-media", protect, async (req, res) => {
+  try {
+    const msg = await Message.findOne({ _id: req.params.messageId, userId: req.user._id });
+    if (!msg) return res.status(404).json({ error: "Not found" });
+    if (!msg.media?.mediaId) return res.status(400).json({ error: "No mediaId on this message" });
+
+    // Already downloaded — just return the URL
+    if (msg.media.url) return res.json({ url: msg.media.url });
+
+    const wa = await WhatsApp.findOne({ userId: req.user._id, isVerified: true });
+    if (!wa) return res.status(400).json({ error: "WhatsApp not connected" });
+
+    const accessToken = wa.connectionType === "platform"
+      ? process.env.SYSTEM_USER_TOKEN
+      : decrypt(wa.encryptedToken);
+
+    const GRAPH_VER = process.env.GRAPH_VERSION || "v21.0";
+
+    // 1. Get the temporary download URL from Meta
+    const metaRes = await axios.get(
+      `https://graph.facebook.com/${GRAPH_VER}/${msg.media.mediaId}`,
+      { headers: { Authorization: `Bearer ${accessToken}` }, timeout: 10000 }
+    );
+    const downloadUrl = metaRes.data?.url;
+    if (!downloadUrl) return res.status(404).json({ error: "Meta returned no download URL" });
+
+    // 2. Download the bytes
+    const mediaRes = await axios.get(downloadUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      responseType: "arraybuffer",
+      timeout: 30000,
+    });
+
+    // 3. Save locally
+    const mimeType = msg.media.mimeType;
+    const ext = MIME_TO_EXT[mimeType] || mimeType?.split("/")?.[1]?.split(";")?.[0] || "bin";
+    const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    const dir = path.join(__dirname, "..", "uploads", req.user._id.toString());
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, filename), Buffer.from(mediaRes.data));
+
+    const BASE_URL = process.env.API_BASE_URL || "http://localhost:5002";
+    const publicUrl = `${BASE_URL}/uploads/${req.user._id}/${filename}`;
+
+    await Message.findByIdAndUpdate(msg._id, { "media.url": publicUrl });
+
+    res.json({ url: publicUrl });
+  } catch (err) {
+    console.error("fetch-media error:", err.response?.data || err.message);
+    res.status(500).json({ error: "Failed to fetch media" });
   }
 });
 

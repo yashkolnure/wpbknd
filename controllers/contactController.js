@@ -1,17 +1,31 @@
 import Contact from '../models/Contact.js';
 
+// Build a query from shared filter params (used by getContacts + exportContacts)
+function buildContactQuery(userId, { search, tags, filter } = {}) {
+  const query = { userId };
+  if (search) {
+    query.$or = [
+      { phone: { $regex: search, $options: 'i' } },
+      { name:  { $regex: search, $options: 'i' } },
+    ];
+  }
+  if (tags) {
+    const tagList = tags.split(',').map(t => t.trim()).filter(Boolean);
+    if (tagList.length) query.tags = { $all: tagList };
+  }
+  if (filter === 'active') {
+    query.lastActive = { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) };
+  } else if (filter === 'opted_out') {
+    query.optedOut = true;
+  }
+  return query;
+}
+
 // GET /api/contacts
 export const getContacts = async (req, res) => {
   try {
-    const { search, page = 1, limit = 20 } = req.query;
-    const query = { userId: req.user._id };
-
-    if (search) {
-      query.$or = [
-        { phone: { $regex: search, $options: 'i' } },
-        { name:  { $regex: search, $options: 'i' } },
-      ];
-    }
+    const { page = 1, limit = 20, search, tags, filter } = req.query;
+    const query = buildContactQuery(req.user._id, { search, tags, filter });
 
     const total    = await Contact.countDocuments(query);
     const contacts = await Contact.find(query)
@@ -65,7 +79,9 @@ export const deleteContact = async (req, res) => {
 // GET /api/contacts/export
 export const exportContacts = async (req, res) => {
   try {
-    const contacts = await Contact.find({ userId: req.user._id }).sort('-lastActive');
+    const { search, tags, filter } = req.query;
+    const query = buildContactQuery(req.user._id, { search, tags, filter });
+    const contacts = await Contact.find(query).sort('-lastActive');
     const rows = ['Name,Phone,Tags,Messages,Last Active,Created'];
     for (const c of contacts) {
       rows.push([

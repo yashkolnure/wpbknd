@@ -1,3 +1,16 @@
+// ── Meta-limit safety net ─────────────────────────────────────────────────
+// Belt-and-suspenders: even if the UI lets something through, truncate to
+// Meta's limits so a single over-long field never causes a 400 that silences
+// the whole bot. Unicode code-point aware (emoji count as 1, like Meta).
+const clamp = (str, limit) => {
+  if (str == null) return str;
+  const s = String(str);
+  const cps = [...s];
+  if (cps.length <= limit) return s;
+  console.warn(`⚠️  [messageBuilder] Truncated field from ${cps.length} → ${limit} chars: "${s.slice(0, 30)}…"`);
+  return cps.slice(0, limit).join('');
+};
+
 // Resolve a usable media link for a media HEADER from the template definition
 // (or an explicit per-send override on the message).
 const headerMediaLink = (comp, message = {}) => {
@@ -80,16 +93,16 @@ export const buildMetaPayload = (to, message) => {
         interactive: {
           type: 'button',
           header: message.buttonHeader
-            ? { type: 'text', text: message.buttonHeader }
+            ? { type: 'text', text: clamp(message.buttonHeader, 60) }
             : undefined,
-          body:   { text: message.buttonBody },
+          body:   { text: clamp(message.buttonBody, 1024) },
           footer: message.buttonFooter
-            ? { text: message.buttonFooter }
+            ? { text: clamp(message.buttonFooter, 60) }
             : undefined,
           action: {
-            buttons: message.buttons.map(btn => ({
+            buttons: (message.buttons || []).slice(0, 3).map(btn => ({
               type:  'reply',
-              reply: { id: btn.id, title: btn.title },
+              reply: { id: btn.id, title: clamp(btn.title, 20) },
             })),
           },
         },
@@ -103,35 +116,50 @@ export const buildMetaPayload = (to, message) => {
         interactive: {
           type: 'list',
           header: message.listHeader
-            ? { type: 'text', text: message.listHeader }
+            ? { type: 'text', text: clamp(message.listHeader, 60) }
             : undefined,
-          body:   { text: message.listBody },
+          body:   { text: clamp(message.listBody, 4096) },
           footer: message.listFooter
-            ? { text: message.listFooter }
+            ? { text: clamp(message.listFooter, 60) }
             : undefined,
           action: {
-            button:   message.listButtonText || 'View options',
-            sections: message.sections.map(sec => ({
-              title: sec.title,
-              rows:  sec.rows.map(row => ({
+            button:   clamp(message.listButtonText || 'View options', 20),
+            sections: (message.sections || []).slice(0, 10).map(sec => ({
+              title: clamp(sec.title, 24),
+              rows:  (sec.rows || []).map(row => ({
                 id:          row.id,
-                title:       row.title,
-                description: row.description || '',
+                title:       clamp(row.title, 24),
+                description: clamp(row.description || '', 72),
               })),
             })),
           },
         },
       };
 
-    case 'media':
+    case 'media': {
+      // Meta requires 'filename' for document messages (both id and link paths)
+      const isDoc = message.mediaType === 'document';
+      const docFilename = message.mediaFilename
+        || (message.mediaUrl ? message.mediaUrl.split('/').pop().split('?')[0] : null)
+        || 'document.pdf';
+      const mediaObject = message.mediaId
+        ? {
+            id: message.mediaId,
+            caption: message.mediaCaption || '',
+            ...(isDoc ? { filename: docFilename } : {}),
+          }
+        : {
+            link: message.mediaUrl,
+            caption: message.mediaCaption || '',
+            ...(isDoc ? { filename: docFilename } : {}),
+          };
       return {
         messaging_product: 'whatsapp',
         to,
-        type: message.mediaType,   // 'image' | 'video' | 'document'
-        [message.mediaType]: message.mediaId
-          ? { id: message.mediaId, caption: message.mediaCaption || '', ...(message.mediaType === 'document' ? { filename: message.mediaFilename || 'file' } : {}) }
-          : { link: message.mediaUrl, caption: message.mediaCaption || '' },
+        type: message.mediaType,
+        [message.mediaType]: mediaObject,
       };
+    }
 
     // ── SINGLE PRODUCT — one product card with Buy button ─────────────────────
     case 'product':
@@ -177,6 +205,56 @@ export const buildMetaPayload = (to, message) => {
                 product_retailer_id: p.retailerId,
               })),
             })),
+          },
+        },
+      };
+    }
+
+    // ── CTA URL — native button that opens a website ─────────────────────────
+    case 'cta_url':
+      return {
+        messaging_product: 'whatsapp',
+        to,
+        type: 'interactive',
+        interactive: {
+          type: 'cta_url',
+          ...(message.header ? { header: { type: 'text', text: clamp(message.header, 60) } } : {}),
+          body: { text: clamp(message.body || '', 1024) },
+          ...(message.footer ? { footer: { text: clamp(message.footer, 60) } } : {}),
+          action: {
+            name: 'cta_url',
+            parameters: {
+              display_text: clamp(message.buttonText || 'Open', 20),
+              url: message.url,
+            },
+          },
+        },
+      };
+
+    // ── FLOW — native in-app form (appointments, lead forms, surveys) ─────────
+    case 'flow': {
+      if (!message.flowId) throw new Error('Flow message requires a flowId');
+      return {
+        messaging_product: 'whatsapp',
+        to,
+        type: 'interactive',
+        interactive: {
+          type: 'flow',
+          ...(message.header ? { header: { type: 'text', text: clamp(message.header, 60) } } : {}),
+          body: { text: clamp(message.body || ' ', 1024) },
+          ...(message.footer ? { footer: { text: clamp(message.footer, 60) } } : {}),
+          action: {
+            name: 'flow',
+            parameters: {
+              flow_message_version: '3',
+              flow_token: message.flowToken || `wpl_${Date.now()}`,
+              flow_id: message.flowId,
+              flow_cta: clamp(message.flowCta || 'Open Form', 20),
+              flow_action: message.flowAction || 'navigate',
+              ...(message.flowScreen
+                ? { flow_action_payload: { screen: message.flowScreen, ...(message.flowData ? { data: message.flowData } : {}) } }
+                : {}),
+            },
           },
         },
       };

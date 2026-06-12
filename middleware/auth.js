@@ -3,7 +3,8 @@ import User from "../models/User.js";
 
 export const protect = async (req, res, next) => {
   try {
-    const token = req.headers.authorization?.split(" ")[1];
+    // Accept token from Authorization header OR ?token= query param (for file downloads)
+    const token = req.headers.authorization?.split(" ")[1] || req.query.token;
 
     if (!token)
       return res.status(401).json({ message: "No token" });

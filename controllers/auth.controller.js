@@ -69,8 +69,15 @@ export const login = async (req, res) => {
     if (!isMatch)
       return res.status(400).json({ message: "Invalid credentials" });
 
+    // Never ship the bcrypt hash or reset-token to the client. (We can't use
+    // .select("-password") on the query above because bcrypt.compare needs it.)
+    const safeUser = user.toObject();
+    delete safeUser.password;
+    delete safeUser.resetPasswordToken;
+    delete safeUser.resetPasswordExpires;
+
     res.json({
-      user,
+      user: safeUser,
       token: generateToken(user._id)
     });
   } catch (error) {

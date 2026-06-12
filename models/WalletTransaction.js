@@ -12,4 +12,13 @@ const txSchema = new mongoose.Schema({
 
 txSchema.index({ userId: 1, createdAt: -1 });
 
+// A Razorpay payment may be credited to a wallet at most ONCE. The partial filter
+// limits the unique constraint to recharge rows (where razorpayPaymentId is a
+// string) so the many debit/credit rows without a payment id don't collide.
+// This insert is the idempotency gate that blocks replayed /recharge/verify calls.
+txSchema.index(
+  { razorpayPaymentId: 1 },
+  { unique: true, partialFilterExpression: { razorpayPaymentId: { $type: 'string' } } }
+);
+
 export default mongoose.model('WalletTransaction', txSchema);

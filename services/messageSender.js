@@ -90,6 +90,22 @@ export const sendMessage = async (userId, to, message) => {
     }
   }
 
+  // ── Media messages: upload the file to WhatsApp and send by media id ─────────
+  // Sending media by public `link` requires Meta's servers to fetch that URL,
+  // which fails for locally-uploaded files (e.g. http://localhost:5002/uploads/…)
+  // or any non-public host. Pushing the bytes to Meta and sending by id is
+  // reliable regardless of whether the URL is publicly reachable. The server can
+  // always read its own /uploads URL. Falls back to link on error.
+  if (outgoing.type === 'media' && !outgoing.mediaId && outgoing.mediaUrl) {
+    try {
+      const fmt = (outgoing.mediaType || 'image').toUpperCase(); // IMAGE | VIDEO | DOCUMENT
+      const mediaId = await resolveHeaderMediaId(wa.phoneNumberId, accessToken, outgoing.mediaUrl, fmt);
+      if (mediaId) outgoing = { ...outgoing, mediaId };
+    } catch (e) {
+      console.error('⚠️ Media upload to Meta failed — falling back to link:', e.response?.data?.error?.message || e.message);
+    }
+  }
+
   const payload = buildMetaPayload(to, outgoing);
 
   const url = `https://graph.facebook.com/${GRAPH()}/${wa.phoneNumberId}/messages`;

@@ -10,9 +10,15 @@ const contactSchema = new mongoose.Schema({
   workflows:     [{ type: String }], // workflow names triggered
   tags:          [{ type: String }],
   activeWorkflowId: { type: Schema.Types.ObjectId, ref: 'Workflow', default: null },
-  currentNodeId: { type: String, default: null },
-  notes:         { type: String, default: '' },
-  optedOut:      { type: Boolean, default: false },
+  currentNodeId:    { type: String, default: null },
+  // Collect-input session state
+  awaitingInput:    { type: Boolean, default: false },
+  awaitingInputVar: { type: String, default: null },       // variable name to store answer into
+  awaitingInputType:{ type: String, default: 'text' },     // text | phone | email | number
+  awaitingRetryMsg: { type: String, default: null },       // message on invalid input
+  variables:        { type: Map, of: String, default: {} },// stored {{variables}} for this contact
+  notes:            { type: String, default: '' },
+  optedOut:         { type: Boolean, default: false },
 }, { timestamps: true });
 
 // One contact per phone per user
